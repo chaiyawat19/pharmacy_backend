@@ -9,14 +9,12 @@ import { RolesModule } from './roles/roles.module';
 import { AuthModule } from './auth/auth.module';
 
 import { APP_GUARD } from '@nestjs/core';
-import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from './common/guard/roles.guard';
+import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard ใหม่
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -41,11 +39,11 @@ import { RolesGuard } from './common/guard/roles.guard';
     AppService,
     {
       provide: APP_GUARD,
-      useClass: AuthGuard('jwt'), // JWT Guard ทุก endpoint
+      useClass: JwtAuthGuard, // ใช้ guard ใหม่
     },
     {
       provide: APP_GUARD,
-      useClass: RolesGuard, // Roles Guard ทุก endpoint
+      useClass: RolesGuard,
     },
   ],
 })
