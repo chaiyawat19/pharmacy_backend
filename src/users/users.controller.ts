@@ -31,13 +31,11 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
-
   @Get('profile')
   getProfile(@Request() req) {
     const user = this.usersService.findByEmail(req.user.email);
     return user;
   }
-
 }
 
 @Controller('admin')
