@@ -1,9 +1,10 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import * as bcrypt from 'bcrypt';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
@@ -56,5 +57,30 @@ export class UsersService {
     hashedPassword: string,
   ): Promise<boolean> {
     return await bcrypt.compare(password, hashedPassword);
+  }
+
+  async updateProfile(
+    user_id: number,
+    updateData: UpdateUserDto,
+  ): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { user_id } });
+
+    if (!user) {
+      throw new NotFoundException(`ไม่พบผู้ใช้งานด้วย ID ${user_id}`);
+    }
+
+    if (updateData.email && updateData.email !== user.email) {
+      const existingUser = await this.userRepository.findOne({
+        where: { email: updateData.email },
+      });
+      if (existingUser) {
+        throw new ConflictException('อีเมลนี้ถูกใช้งานแล้ว กรุณาใช้อีเมลอื่น');
+      }
+    }
+
+    delete updateData.password;
+    Object.assign(user, updateData);
+
+    return await this.userRepository.save(user);
   }
 }
