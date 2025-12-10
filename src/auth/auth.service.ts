@@ -22,20 +22,24 @@ export class AuthService {
     }
 
     return {
+      id: user.user_id, // <-- เปลี่ยนจาก user_id เป็น id
       email: user.email,
       first_name: user.first_name,
       last_name: user.last_name,
-      user_id: user.user_id,
       role_id: user.role_id,
     };
   }
 
   async login(user: any) {
-    const payload = { sub: user.user_id, email: user.email };
-    return {
-      accessToken: this.jwtService.sign(payload),
-      role_id: user.role_id, 
-
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role_id: user.role_id,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      university: user.university?.name,
     };
+    const accessToken = this.jwtService.sign(payload);
+    return { accessToken, role_id: user.role_id };
   }
 }

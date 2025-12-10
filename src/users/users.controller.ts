@@ -41,7 +41,7 @@ export class UsersController {
   @UseGuards(AuthGuard('jwt'))
   @Patch('profile')
   async updateProfile(@Request() req, @Body() updateData: UpdateUserDto) {
-    const userId = req.user.user_id;
+    const userId = req.user.id; // <-- เปลี่ยนจาก user_id เป็น id
 
     const updatedUser = await this.usersService.updateProfile(
       userId,
@@ -49,9 +49,9 @@ export class UsersController {
     );
 
     const { password, ...userWithoutPassword } = updatedUser;
-
     return userWithoutPassword;
   }
+
 }
 
 @Controller('admin')

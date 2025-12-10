@@ -11,6 +11,7 @@ import { AuthModule } from './auth/auth.module';
 import { APP_GUARD } from '@nestjs/core';
 import { RolesGuard } from './common/guard/roles.guard';
 import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard ใหม่
+import { NotesModule } from './notes/notes.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard �
     UniversitiesModule,
     RolesModule,
     AuthModule,
+    NotesModule,
   ],
   controllers: [AppController],
   providers: [
