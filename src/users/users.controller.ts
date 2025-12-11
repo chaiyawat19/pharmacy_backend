@@ -5,16 +5,18 @@ import {
   Body,
   UseGuards,
   Request,
+  Patch,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { AuthGuard } from '@nestjs/passport';
-import { Public } from '../common/decorators/public.decorator'; 
+import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/role.decorator';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) { }
 
   @Public()
   @Post('/register')
@@ -30,12 +32,24 @@ export class UsersController {
   findAll() {
     return this.usersService.findAll();
   }
-
-
+  @UseGuards(AuthGuard('jwt'))
   @Get('profile')
   getProfile(@Request() req) {
     const user = this.usersService.findByEmail(req.user.email);
     return user;
+  }
+  @UseGuards(AuthGuard('jwt'))
+  @Patch('profile')
+  async updateProfile(@Request() req, @Body() updateData: UpdateUserDto) {
+    const userId = req.user.id; // <-- เปลี่ยนจาก user_id เป็น id
+
+    const updatedUser = await this.usersService.updateProfile(
+      userId,
+      updateData,
+    );
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
   }
 
 }

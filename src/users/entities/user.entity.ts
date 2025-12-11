@@ -6,10 +6,12 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  OneToMany,
 } from 'typeorm';
-import { University } from '../../universities/entities/university.entity'
+import { University } from '../../universities/entities/university.entity';
 import { Role } from '../../roles/entities/role.entity';
 import { Exclude } from 'class-transformer';
+import { Note } from 'src/notes/entities/note.entity';
 
 @Entity('users')
 export class User {
@@ -50,6 +52,9 @@ export class User {
   @ManyToOne(() => Role)
   @JoinColumn({ name: 'role_id' })
   role: Role;
+
+  @OneToMany(() => Note, (note) => note.user)
+  notes: Note[];
 
   @CreateDateColumn({ type: 'timestamp with time zone' })
   created_at: Date;

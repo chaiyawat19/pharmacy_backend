@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import * as bcrypt from 'bcrypt';
@@ -13,29 +13,33 @@ export class AuthService {
   async validateUser(email: string, pass: string): Promise<any> {
     const user = await this.userService.findByEmail(email);
     if (!user) {
-      return null; 
+      throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
 
-    if (user && (await bcrypt.compare(pass, user.password))) {
-      const result = user;
-      return {
-        email: result.email,
-        first_name: result.first_name,
-        last_name: result.last_name,
-        user_id: result.user_id,
-      };
+    const isPasswordValid = await bcrypt.compare(pass, user.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
-    return null;
+
+    return {
+      id: user.user_id, // <-- เปลี่ยนจาก user_id เป็น id
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      role_id: user.role_id,
+    };
   }
 
   async login(user: any) {
     const payload = {
+      sub: user.id,
       email: user.email,
-      sub: user.user_id,
       role_id: user.role_id,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      university: user.university?.name,
     };
-    return {
-      accessToken: this.jwtService.sign(payload),
-    };
+    const accessToken = this.jwtService.sign(payload);
+    return { accessToken, role_id: user.role_id };
   }
 }

@@ -1,22 +1,31 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from '@nestjs/common';
 import { UniversitiesService } from './universities.service';
 import { CreateUniversityDto } from './dto/create-university.dto';
 import { UpdateUniversityDto } from './dto/update-university.dto';
+import { Public } from 'src/common/decorators/public.decorator';
 
 @Controller('universities')
 export class UniversitiesController {
-  constructor(private readonly universitiesService: UniversitiesService) {}
+  constructor(private readonly universitiesService: UniversitiesService) { }
 
   @Post()
   create(@Body() createUniversityDto: CreateUniversityDto) {
     return this.universitiesService.create(createUniversityDto);
   }
 
+  @Public()
   @Get()
   findAll() {
     return this.universitiesService.findAll();
   }
-
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.universitiesService.findOne(+id);
