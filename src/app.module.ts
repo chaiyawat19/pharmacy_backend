@@ -10,7 +10,9 @@ import { AuthModule } from './auth/auth.module';
 
 import { APP_GUARD } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './common/guard/roles.guard';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -35,13 +37,14 @@ import { RolesGuard } from './common/guard/roles.guard';
     UniversitiesModule,
     RolesModule,
     AuthModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     {
       provide: APP_GUARD,
-      useClass: AuthGuard('jwt'), // JWT Guard ทุก endpoint
+      useClass: JwtAuthGuard,
     },
     {
       provide: APP_GUARD,
@@ -49,4 +52,4 @@ import { RolesGuard } from './common/guard/roles.guard';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
