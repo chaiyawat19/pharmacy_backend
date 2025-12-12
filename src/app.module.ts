@@ -12,6 +12,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { RolesGuard } from './common/guard/roles.guard';
 import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard ใหม่
 import { NotesModule } from './notes/notes.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -35,8 +36,9 @@ import { NotesModule } from './notes/notes.module';
     RolesModule,
     AuthModule,
     NotesModule,
+    ChatModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController], 
   providers: [
     AppService,
     {

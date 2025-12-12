@@ -13,6 +13,9 @@ export class Chat_session {
   @PrimaryGeneratedColumn({ name: 'chat_session_id' })
   session_id: number;
 
+  @Column({ type: 'text'})
+  title: string;
+
   @Column({ type: 'integer' })
   user_id: number;
 

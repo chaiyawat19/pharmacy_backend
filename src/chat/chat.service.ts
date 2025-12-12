@@ -4,12 +4,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Chat_session } from './entities/chat_session.entity';
 import { Repository } from 'typeorm';
 import { Chat_message } from './entities/chat_message.entity';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
-export interface MessageEvent {
-    data: string | object;
-}
 
 @Injectable()
 export class ChatService {
@@ -21,76 +17,120 @@ export class ChatService {
         private readonly messageRepo: Repository<Chat_message>
     ) { }
 
-    // เปลี่ยน Return Type เป็น Observable สำหรับ SSE
-    async sendTon8nSSE(user_id: number, userMessage: string, token?: string): Promise<Observable<MessageEvent>> {
-        // 1. หา Session (Code เดิมของคุณ)
-        // const session = await this.getOrCreateSession(user_id); 
-        const sessionId = 5; // Mock ไว้ก่อนตามตัวอย่าง
+    // ส่งข้อความไปยัง n8n 2 รอบ
+    async sendMessageToN8N(user_id: number, session_id: number, message: string): Promise<any> {
+
+        if (!session_id || session_id.toString() === 'null' || Number.isNaN(Number(session_id))) {
+            const newSession = await this.sessionRepo.save({
+                user_id: user_id,
+                title: message.slice(0, 50) // ชื่อ session จากข้อความแรก
+            });
+            console.log(newSession);
+            session_id = newSession.session_id;
+        }
+
+        const savedUserMessage = await this.messageRepo.save({
+            chat_session_id: session_id,
+            message_text: message,
+            sender_type: 'USER'
+        });
 
         const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
+        let botReply = '';
+
         const payload = {
-            session_id: sessionId,
-            message: userMessage
+            user_id: user_id,
+            session_id: session_id,
+            message: message
         };
 
         try {
-            // 2. ยิง Request ไป n8n โดยบอกว่าขอ responseType เป็น 'stream'
-            const headers = {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {}), // ถ้ามี Token ก็ส่งไปด้วย
-            };
+            const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
+            botReply = response.data?.reply ?? '';
 
-            const response = await this.httpService.axiosRef.post(n8nUrl, payload, {
-                headers: headers,
-                responseType: 'stream',
-            });
-
-            // 3. สร้าง Observable เพื่อส่งข้อมูลกลับทีละก้อน
-            return new Observable<MessageEvent>((observer) => {
-                const stream = response.data;
-                let buffer = ''; // เอาไว้พักเศษข้อมูลที่ยังมาไม่ครบ json
-
-                stream.on('data', (chunk: Buffer) => {
-                    // แปลง chunk เป็น string แล้วรวมกับ buffer เดิม
-                    buffer += chunk.toString();
-
-                    // n8n ส่งมาทีละบรรทัด แยกด้วย \n
-                    const lines = buffer.split('\n');
-
-                    // บรรทัดสุดท้ายอาจจะไม่สมบูรณ์ (incomplete) เก็บไว้ใน buffer รอรอบหน้า
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        if (line.trim()) { // ถ้าไม่ใช่บรรทัดว่าง
-                            try {
-                                const json = JSON.parse(line);
-
-                                // กรองเอาเฉพาะ type: 'item' และดึง content ออกมา
-                                if (json.type === 'item' && json.content) {
-                                    // ส่งเฉพาะข้อความเนื้อหาไปให้ Frontend
-                                    observer.next({ data: json.content });
-                                }
-                            } catch (e) {
-                                console.error('Error parsing JSON line from n8n:', e);
-                            }
-                        }
-                    }
-                });
-
-                stream.on('end', () => {
-                    observer.complete(); // จบการทำงาน
-                });
-
-                stream.on('error', (err) => {
-                    observer.error(err);
-                });
-            });
 
         } catch (error) {
             console.error('Error calling n8n:', error.message);
-            throw new HttpException('Chat service unavailable', HttpStatus.BAD_GATEWAY);
+            botReply = 'ขออภัย เกิดข้อผิดพลาดในการประมวลผล (AI Service Error)';
+        }
+
+        const savedBotMessage = await this.messageRepo.save({
+            chat_session_id: session_id,
+            message_text: botReply,
+            sender_type: 'BOT'
+        });
+        return {
+            user: savedUserMessage,
+            bot: savedBotMessage
         }
     }
 
-    // ... method getOrCreateSession เดิมของคุณ ...
+    // ดึงข้อมูลแชททั้งหมดภายใน session
+    async getMessages(session_id: number) {
+        return this.messageRepo.find({
+            where: { chat_session_id: session_id },
+            order: { sent_at: "DESC" }
+        });
+    }
+
+    async getSession(user_id: number) {
+        return this.sessionRepo.findAndCount({
+            where: { user_id },
+            order: { created_at: "DESC" }
+        });
+    }
+
+    async deleteSession(session_id: number) {
+        return this.sessionRepo.delete({ session_id });
+    }
+
+    async editMessage(message_id: number, message_text: string) {
+        // 1. ค้นหาข้อความเดิมเพื่อเอา session_id และ user_id
+        const existingMessage = await this.messageRepo.findOne({
+            where: { message_id },
+            relations: ['chat_session'] // Join ไปตาราง session เพื่อเอา user_id
+        });
+
+        if (!existingMessage) {
+            throw new HttpException('Message not found', HttpStatus.NOT_FOUND);
+        }
+
+        // 2. อัปเดตข้อความของผู้ใช้ (Edit)
+        existingMessage.message_text = message_text;
+        const updatedUserMessage = await this.messageRepo.save(existingMessage);
+
+        // 3. เตรียมข้อมูลส่ง n8n (Manual Call เพื่อไม่ให้ save ข้อความ User ซ้ำ)
+        const session_id = existingMessage.chat_session_id;
+        const user_id = existingMessage.chat_session.user_id;
+        const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
+        let botReply = '';
+
+        const payload = {
+            user_id: user_id,
+            session_id: session_id,
+            message: message_text
+        };
+
+        try {
+            const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
+            botReply = response.data?.reply ?? '';
+        } catch (error) {
+            console.error('Error calling n8n:', error.message);
+            botReply = 'ขออภัย เกิดข้อผิดพลาดในการประมวลผล (AI Service Error)';
+        }
+
+        // 4. บันทึกเฉพาะข้อความจาก Bot ใหม่
+        const savedBotMessage = await this.messageRepo.save({
+            chat_session_id: session_id,
+            message_text: botReply,
+            sender_type: 'BOT'
+        });
+
+        return {
+            user: updatedUserMessage,
+            bot: savedBotMessage
+        };
+    }
+
 }
+

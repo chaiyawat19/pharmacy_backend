@@ -169,45 +169,47 @@
             // chatBox.appendChild(botMsgDiv); 
 
             try {
-                const response = await fetch(`http://localhost:3000/chat/stream?userId=1&message=${encodeURIComponent(message)}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                const response = await fetch('http://localhost:5000/chat/message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ userId: 1, message: message })
                 });
 
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let firstChunk = true;
+                const data = await response.json();
 
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
+                // Remove thinking indicator
+                if (chatBox.contains(thinkingDiv)) {
+                    chatBox.removeChild(thinkingDiv);
+                }
 
-                    // เมื่อได้รับข้อมูลก้อนแรก ให้ลบ Thinking ออก และเริ่มแสดงข้อความ Bot
-                    if (firstChunk) {
-                        chatBox.removeChild(thinkingDiv);
-                        chatBox.appendChild(botMsgDiv);
-                        firstChunk = false;
-                    }
+                // Show bot message container
+                chatBox.appendChild(botMsgDiv);
 
-                    const chunk = decoder.decode(value, { stream: true });
-                    const lines = chunk.split('\n');
+                // Extract text from n8n response
+                // Adjust this based on your actual n8n output structure
+                let text = '';
+                if (Array.isArray(data) && data.length > 0) {
+                    text = data[0].content || data[0].output || JSON.stringify(data);
+                } else if (typeof data === 'object') {
+                    text = data.content || data.output || JSON.stringify(data);
+                } else {
+                    text = String(data);
+                }
 
-                    for (const line of lines) {
-                        if (line.startsWith('data:')) {
-                            const data = line.replace('data:', '').trim();
-                            if (data) {
-                                // ยัดเข้า Queue แทนที่จะแสดงผลเลย
-                                data.split('').forEach(char => typeQueue.push(char));
-                                processTypeQueue(botMsgDiv);
-                            }
-                        }
-                    }
+                // Push to type queue
+                if (text) {
+                    text.split('').forEach(char => typeQueue.push(char));
+                    processTypeQueue(botMsgDiv);
                 }
 
             } catch (error) {
-                console.error("Stream Error:", error);
-                if (document.body.contains(thinkingDiv)) thinkingDiv.remove();
+                console.error("Error:", error);
+                if (chatBox.contains(thinkingDiv)) chatBox.removeChild(thinkingDiv);
 
                 const errDiv = document.createElement('div');
                 errDiv.className = 'message bot';
@@ -215,6 +217,7 @@
                 errDiv.innerText = `Error: ${error.message}`;
                 chatBox.appendChild(errDiv);
             }
+
         }
 
         function processTypeQueue(element) {

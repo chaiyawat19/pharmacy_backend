@@ -22,6 +22,9 @@ export class Chat_message {
   @Column({ type: 'text' })
   message_text: string;
 
+  @Column({ type: 'integer' })
+  chat_session_id: number;
+
   @ManyToOne(() => Chat_session, (session) => session.session_id)
   @JoinColumn({ name: 'chat_session_id' })
   chat_session: Chat_session;
