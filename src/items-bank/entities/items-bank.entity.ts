@@ -15,9 +15,6 @@ export class ItemsBank {
   bank_name: string;
 
   @Column({ type: 'varchar', length: 255 })
-  bank_code: string;
-
-  @Column({ type: 'varchar', length: 255 })
   description: string;
 
   @CreateDateColumn({ type: 'timestamp with time zone' })

@@ -1,10 +1,11 @@
 import {
-    IsEmail,
-    IsNotEmpty,
-    IsString,
-    MinLength,
-    IsDate,
-    IsInt
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  MinLength,
+  IsDate,
+  IsInt,
+  IsOptional
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Match } from '../../common/decorators/match.decorator';

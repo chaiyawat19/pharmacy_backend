@@ -1,8 +1,26 @@
+import {
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsNumber,
+} from 'class-validator';
+
 export class CreateItemsBankDto {
-    bank_name: string;
-    bank_code: string;
-    description: string;
-    created_at: Date;
-    updated_at: Date;
-    deleted_at: Date;
+    @IsNotEmpty()
+    @IsNumber()
+    item_bank_id: number;
+
+    @IsNotEmpty()
+    @IsString()
+    situation_title: string;
+
+    @IsNotEmpty()
+    @IsString()
+    situation_text: string;
+
+    @IsOptional()
+    @IsString()
+    situation_image_url: string;
 }
+
+
