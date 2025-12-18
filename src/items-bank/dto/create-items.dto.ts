@@ -41,6 +41,10 @@ export class CreateItemsDto {
     @IsOptional()
     @IsNumber()
     irt_c_guessing: number;
+
+    @IsOptional()
+    @IsNumber()
+    sub_topic_id: number;
 }
 
 

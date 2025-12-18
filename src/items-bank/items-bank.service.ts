@@ -12,6 +12,7 @@ import { Item } from './entities/items.entity';
 import { ItemBankItem } from './entities/item_bank_items.entity';
 import { AnswerOption } from './entities/answer_options.entity';
 import { CreateAnswerOptionDto } from './dto/answer_options.dto';
+import { ItemSubTopic } from './entities/item_sub_topics.entity';
 
 @Injectable()
 export class ItemsBankService {
@@ -26,6 +27,8 @@ export class ItemsBankService {
     private readonly itemBankItemRepo: Repository<ItemBankItem>,
     @InjectRepository(AnswerOption)
     private readonly answerOptionRepo: Repository<AnswerOption>,
+    @InjectRepository(ItemSubTopic)
+    private readonly itemSubTopicRepo: Repository<ItemSubTopic>,
   ) { }
 
   createBank(createItemsBankDto: CreateItemsBankDto) {
@@ -62,6 +65,15 @@ export class ItemsBankService {
     });
 
     await this.itemBankItemRepo.save(itemBankItem);
+
+    // 4. Save ลงตาราง item_sub_topics (ถ้ามี)
+    if (createItemsDto.sub_topic_id) {
+      const itemSubTopic = this.itemSubTopicRepo.create({
+        item_id: savedItem.item_id,
+        sub_topic_id: createItemsDto.sub_topic_id,
+      });
+      await this.itemSubTopicRepo.save(itemSubTopic);
+    }
 
     return savedItem;
   }
@@ -109,5 +121,5 @@ export class ItemsBankService {
     return `This action removes a #${id} itemsBank`;
   }
 
-  
+
 }

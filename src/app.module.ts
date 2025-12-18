@@ -14,6 +14,7 @@ import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard เน
 import { NotesModule } from './notes/notes.module';
 import { ChatModule } from './chat/chat.module';
 import { ItemsBankModule } from './items-bank/items-bank.module';
+import { TopicsModule } from './topics/topics.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { ItemsBankModule } from './items-bank/items-bank.module';
     NotesModule,
     ChatModule,
     ItemsBankModule,
+    TopicsModule,
   ],
   controllers: [AppController], 
   providers: [
