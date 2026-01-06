@@ -20,7 +20,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService, // <-- inject UsersService
-  ) { }
+  ) {}
 
   // --- Public login ---
   @Public()

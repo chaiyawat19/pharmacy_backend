@@ -58,7 +58,11 @@ export class User {
   role: Role;
 
   // ✅ แยกว่า login แบบไหน
-  @Column({ type: 'varchar', length: 20, default: 'local' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: 'local',
+  })
   provider: 'local' | 'google';
 
   @OneToMany(() => Note, (note) => note.user)

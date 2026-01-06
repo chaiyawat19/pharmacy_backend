@@ -58,9 +58,10 @@ export class UsersService {
 
   async validatePassword(
     password: string,
-    hashedPassword: string,
+    hashedPassword: string | null,
   ): Promise<boolean> {
-    return await bcrypt.compare(password, hashedPassword);
+    if (!hashedPassword) return false; // Google user
+    return bcrypt.compare(password, hashedPassword);
   }
 
   // users.service.ts
@@ -76,12 +77,11 @@ export class UsersService {
       last_name: data.last_name,
       provider: data.provider,
       role_id: 1,
-      password: null,        // Google ไม่มี password
+      password: null, // Google ไม่มี password
     });
 
     return this.userRepository.save(user);
   }
-
 
   async updateProfile(
     user_id: number,
