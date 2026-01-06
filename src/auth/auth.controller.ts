@@ -7,6 +7,7 @@ import {
   Get,
   NotFoundException,
   Req,
+  Body,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service'; // <-- เพิ่ม import UsersService
@@ -20,7 +21,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService, // <-- inject UsersService
-  ) {}
+  ) { }
 
   // --- Public login ---
   @Public()
@@ -40,6 +41,18 @@ export class AuthController {
       accessToken,
       user: req.user,
     };
+  }
+
+  @Public()
+  @Post('forgot-password')
+  async forgotPassword(@Body('email') email: string) {
+    return this.authService.forgotPassword(email);
+  }
+  @Public()
+  @Post('reset-password')
+  async resetPassword(@Body() body: { token: string; newPassword: string }) {
+    console.log('Received Body:', body); // ดูใน Terminal ของ NestJS ว่าค่าเข้าไหม
+    return this.authService.resetPassword(body.token, body.newPassword);
   }
 
   // --- Logout ---

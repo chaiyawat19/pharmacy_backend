@@ -13,6 +13,7 @@ import { RolesGuard } from './common/guard/roles.guard';
 import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard ใหม่
 import { NotesModule } from './notes/notes.module';
 import { ChatModule } from './chat/chat.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { ChatModule } from './chat/chat.module';
     AuthModule,
     NotesModule,
     ChatModule,
+    MailModule,
   ],
   controllers: [AppController], 
   providers: [

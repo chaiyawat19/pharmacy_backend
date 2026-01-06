@@ -65,6 +65,12 @@ export class User {
   })
   provider: 'local' | 'google';
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  reset_password_token: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reset_password_expires: Date | null;
+
   @OneToMany(() => Note, (note) => note.user)
   notes: Note[];
 

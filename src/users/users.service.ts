@@ -5,21 +5,32 @@ import {
 } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThan, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
+  async save(user: User): Promise<User> {
+    return await this.userRepository.save(user);
+  }
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-  ) { }
+  ) {}
   async findOneById(user_id: number): Promise<User | null> {
     return this.userRepository.findOne({
       where: { user_id: user_id },
       relations: { university: true, role: true },
+    });
+  }
+  async findOneByResetToken(token: string): Promise<User | null> {
+    return await this.userRepository.findOne({
+      where: {
+        reset_password_token: token,
+        reset_password_expires: MoreThan(new Date()),
+      },
     });
   }
   async findAll() {
