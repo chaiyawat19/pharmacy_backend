@@ -1,4 +1,8 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -59,11 +63,30 @@ export class UsersService {
     return await bcrypt.compare(password, hashedPassword);
   }
 
+  // users.service.ts
+  async createSocialUser(data: {
+    email: string;
+    first_name: string;
+    last_name: string;
+    provider: 'google';
+  }): Promise<User> {
+    const user = this.userRepository.create({
+      email: data.email,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      provider: data.provider,
+      role_id: 1,
+      password: null,        // Google ไม่มี password
+    });
+
+    return this.userRepository.save(user);
+  }
+
+
   async updateProfile(
     user_id: number,
     updateData: UpdateUserDto,
   ): Promise<User> {
-    // หา user ที่จะอัปเดต
     const user = await this.userRepository.findOne({
       where: { user_id },
       relations: { university: true, role: true },

@@ -28,7 +28,9 @@ export class Note {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @OneToMany(() => NoteTag, (noteTag) => noteTag.note)
+  @OneToMany(() => NoteTag, (noteTag) => noteTag.note, {
+    cascade: true,
+  })
   tags: NoteTag[];
 
   @OneToMany(() => NoteFile, (file) => file.note)

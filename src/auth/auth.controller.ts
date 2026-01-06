@@ -6,19 +6,21 @@ import {
   Res,
   Get,
   NotFoundException,
+  Req,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service'; // <-- เพิ่ม import UsersService
 import { LocalAuthGuard } from './local-auth.guard';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { Public } from 'src/common/decorators/public.decorator';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService, // <-- inject UsersService
-  ) {}
+  ) { }
 
   // --- Public login ---
   @Public()
@@ -60,5 +62,25 @@ export class AuthController {
     return userWithoutPassword;
   }
 
+  // ---------- GOOGLE LOGIN ----------
+  @Public()
+  @Get('google')
+  @UseGuards(AuthGuard('google'))
+  googleLogin() { }
+
+  @Public()
+  @Get('google/callback')
+  @UseGuards(AuthGuard('google'))
+  async googleCallback(@Req() req, @Res() res) {
+    const accessToken = await this.authService.socialLogin(req.user);
+
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: false,
+    });
+
+    res.redirect('http://localhost:3000/user');
+  }
 
 }
