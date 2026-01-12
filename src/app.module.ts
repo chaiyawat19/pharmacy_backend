@@ -40,7 +40,7 @@ import { MailModule } from './mail/mail.module';
     ChatModule,
     MailModule,
   ],
-  controllers: [AppController], 
+  controllers: [AppController],
   providers: [
     AppService,
     {
@@ -53,4 +53,4 @@ import { MailModule } from './mail/mail.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}

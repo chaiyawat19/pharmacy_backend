@@ -75,7 +75,6 @@ export class UsersService {
     return bcrypt.compare(password, hashedPassword);
   }
 
-  // users.service.ts
   async createSocialUser(data: {
     email: string;
     first_name: string;
@@ -88,7 +87,7 @@ export class UsersService {
       last_name: data.last_name,
       provider: data.provider,
       role_id: 1,
-      password: null, // Google ไม่มี password
+      password: null,
     });
 
     return this.userRepository.save(user);
@@ -107,7 +106,6 @@ export class UsersService {
       throw new NotFoundException(`ไม่พบผู้ใช้งานด้วย ID ${user_id}`);
     }
 
-    // ถ้ามีการเปลี่ยน email
     if (updateData.email) {
       const newEmail = updateData.email.trim().toLowerCase();
       const currentEmail = user.email.toLowerCase();
@@ -116,18 +114,6 @@ export class UsersService {
         const existingUser = await this.userRepository.findOne({
           where: { email: newEmail },
         });
-
-        console.log('UpdateProfile Debug:');
-        console.log(
-          'Current user id:',
-          user_id,
-          'Current email:',
-          currentEmail,
-        );
-        console.log('New email:', newEmail);
-        console.log('Existing user with new email:', existingUser);
-
-        // ถ้าเจอ user คนอื่นที่ใช้ email นี้
         if (existingUser && existingUser.user_id !== user_id) {
           throw new ConflictException(
             'อีเมลนี้ถูกใช้งานแล้ว กรุณาใช้อีเมลอื่น',
@@ -137,8 +123,6 @@ export class UsersService {
 
       updateData.email = newEmail;
     }
-
-    // ไม่ให้ update password ตรงนี้
     delete updateData.password;
 
     Object.assign(user, updateData);

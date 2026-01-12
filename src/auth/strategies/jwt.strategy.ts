@@ -6,20 +6,23 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([
-        (req: any) => req?.cookies?.access_token, // ดึงจาก cookie
-      ]),
-      ignoreExpiration: false,
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       secretOrKey: process.env.JWT_SECRET || 'SECRETKEY',
-
     });
   }
 
   async validate(payload: any) {
+    const rolesMap = {
+      1: 'admin',
+      2: 'user',
+    };
+    const roleName = rolesMap[payload.role_id] || 'guest';
+
     return {
-      id: payload.sub,
+      userId: payload.sub,
       email: payload.email,
       role_id: payload.role_id ?? null,
+      role: roleName, // <--- เพิ่มตัวนี้ เพื่อส่งไปให้ RolesGuard ตรวจสอบ
     };
   }
 }
