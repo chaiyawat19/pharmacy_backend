@@ -1,9 +1,9 @@
+// pharmacy_backend\src\notes\dto\update-note.dto.ts
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateNoteDto } from './create-note.dto';
-import { IsOptional, IsArray } from 'class-validator';
+import { IsOptional } from 'class-validator';
 
 export class UpdateNoteDto extends PartialType(CreateNoteDto) {
   @IsOptional()
-  @IsArray()
-  deletedFiles?: string[];
+  deletedFiles?: any; // เปลี่ยนจาก string[] เป็น any เพื่อรองรับ FormData
 }

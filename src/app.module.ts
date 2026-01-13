@@ -14,6 +14,8 @@ import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard �
 import { NotesModule } from './notes/notes.module';
 import { ChatModule } from './chat/chat.module';
 import { MailModule } from './mail/mail.module';
+import { SchedulesController } from './schedules/schedules.controller';
+import { SchedulesModule } from './schedules/schedules.module';
 
 @Module({
   imports: [
@@ -39,13 +41,14 @@ import { MailModule } from './mail/mail.module';
     NotesModule,
     ChatModule,
     MailModule,
+    SchedulesModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     {
       provide: APP_GUARD,
-      useClass: JwtAuthGuard, // ใช้ guard ใหม่
+      useClass: JwtAuthGuard,
     },
     {
       provide: APP_GUARD,
