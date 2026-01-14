@@ -58,7 +58,6 @@ export class AuthController {
     return userWithoutPassword;
   }
 
-  // ---------- GOOGLE LOGIN ----------
   @Public()
   @Get('google')
   @UseGuards(AuthGuard('google'))
