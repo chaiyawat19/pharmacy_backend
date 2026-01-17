@@ -28,6 +28,11 @@ export class ChatController {
     return this.chatService.getSession(user_id);
   }
 
+  @Get('sessions')
+  async getAllSessions() {
+    return this.chatService.getAllSessions();
+  }
+
   @Delete('session/:session_id')
   async deleteSession(
     @Param('session_id') session_id: number

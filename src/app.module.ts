@@ -15,6 +15,8 @@ import { NotesModule } from './notes/notes.module';
 import { ChatModule } from './chat/chat.module';
 import { ItemsBankModule } from './items-bank/items-bank.module';
 import { TopicsModule } from './topics/topics.module';
+import { CategoriesModule } from './categories/categories.module';
+import { CATModule } from './cat/cat.module';
 
 @Module({
   imports: [
@@ -41,8 +43,10 @@ import { TopicsModule } from './topics/topics.module';
     ChatModule,
     ItemsBankModule,
     TopicsModule,
+    CategoriesModule,
+    CATModule,
   ],
-  controllers: [AppController], 
+  controllers: [AppController],
   providers: [
     AppService,
     {

@@ -12,10 +12,6 @@ export class CreateSituationDto {
 
     @IsNotEmpty()
     @IsString()
-    situation_title: string;
-
-    @IsNotEmpty()
-    @IsString()
     situation_text: string;
 
     @IsOptional()

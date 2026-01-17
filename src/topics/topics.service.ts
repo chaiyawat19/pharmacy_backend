@@ -25,19 +25,99 @@ export class TopicsService {
     return this.subTopicRepository.save(subTopic);
   }
 
-  findAll() {
-    return this.topicRepository.find();
+  // ดึง topics ทั้งหมดพร้อม sub-topics
+  async findAll() {
+    const topics = await this.topicRepository.find({
+      order: { topic_id: 'ASC' }
+    });
+
+    // ดึง sub-topics สำหรับแต่ละ topic
+    const topicsWithSubTopics = await Promise.all(
+      topics.map(async (topic) => {
+        const subTopics = await this.subTopicRepository.find({
+          where: { topic_id: topic.topic_id },
+          order: { sub_topic_id: 'ASC' }
+        });
+        return {
+          ...topic,
+          sub_topics: subTopics
+        };
+      })
+    );
+
+    return topicsWithSubTopics;
   }
 
   findOne(id: number) {
     return this.topicRepository.findOne({ where: { topic_id: id } });
   }
 
+  async findOneWithSubTopics(id: number) {
+    const topic = await this.topicRepository.findOne({ where: { topic_id: id } });
+    if (!topic) {
+      return null;
+    }
+    const subTopics = await this.subTopicRepository.find({
+      where: { topic_id: id },
+      order: { sub_topic_id: 'ASC' }
+    });
+    return {
+      ...topic,
+      sub_topics: subTopics
+    };
+  }
+
   update(id: number, updateTopicDto: UpdateTopicDto) {
     return this.topicRepository.update(id, updateTopicDto);
   }
 
-  remove(id: number) {
+  async remove(id: number) {
+    // ลบ sub-topics ที่เกี่ยวข้องก่อน
+    await this.subTopicRepository.delete({ topic_id: id });
+    // แล้วค่อยลบ topic
     return this.topicRepository.delete(id);
+  }
+
+  // Sub-topic methods
+  async findAllSubTopics() {
+    const [topics, subTopics] = await Promise.all([
+      this.topicRepository.find({
+        order: { topic_id: 'ASC' }
+      }),
+      this.subTopicRepository.find({
+        order: { sub_topic_id: 'ASC' }
+      })
+    ]);
+
+    return {
+      topics: topics.map(t => ({
+        topic_id: t.topic_id,
+        topic_name: t.topic_name
+      })),
+      sub_topics: subTopics.map(st => ({
+        sub_topic_id: st.sub_topic_id,
+        topic_id: st.topic_id,
+        sub_topic_name: st.sub_topic_name
+      }))
+    };
+  }
+
+  findSubTopicsByTopicId(topicId: number) {
+    return this.subTopicRepository.find({
+      where: { topic_id: topicId },
+      order: { sub_topic_id: 'ASC' }
+    });
+  }
+
+  findOneSubTopic(id: number) {
+    return this.subTopicRepository.findOne({ where: { sub_topic_id: id } });
+  }
+
+  updateSubTopic(id: number, updateData: Partial<CreateSubTopicDto>) {
+    return this.subTopicRepository.update(id, updateData);
+  }
+
+  removeSubTopic(id: number) {
+    return this.subTopicRepository.delete(id);
   }
 }

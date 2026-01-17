@@ -3,24 +3,26 @@ import {
   IsString,
   IsOptional,
   IsNumber,
+  IsArray,
 } from 'class-validator';
 
 export class CreateItemsBankDto {
-    @IsNotEmpty()
-    @IsNumber()
-    item_bank_id: number;
+  @IsNotEmpty()
+  @IsString()
+  bank_name: string;
 
-    @IsNotEmpty()
-    @IsString()
-    situation_title: string;
+  @IsNotEmpty()
+  @IsString()
+  description: string;
 
-    @IsNotEmpty()
-    @IsString()
-    situation_text: string;
+  @IsNotEmpty()
+  @IsNumber()
+  duration: number;
 
-    @IsOptional()
-    @IsString()
-    situation_image_url: string;
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  category_ids?: number[];
 }
 
 

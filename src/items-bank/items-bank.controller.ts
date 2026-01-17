@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Req, Query } from '@nestjs/common';
 import { ItemsBankService } from './items-bank.service';
 import { CreateItemsBankDto } from './dto/create-items-bank.dto';
 import { CreateSituationDto } from './dto/create-situation.dto';
@@ -7,6 +7,7 @@ import { ReorderItemsDto } from './dto/reorder-items.dto';
 import { UpdateItemsBankDto } from './dto/update-items-bank.dto';
 import { Roles } from 'src/common/decorators/role.decorator';
 import { CreateAnswerOptionDto } from './dto/answer_options.dto';
+import { CreateBulkQuestionsDto } from './dto/create-bulk-questions.dto';
 
 @Roles(2)
 @Controller('items-bank')
@@ -21,6 +22,11 @@ export class ItemsBankController {
   @Get()
   getBank() {
     return this.itemsBankService.getBank();
+  }
+
+  @Get('search')
+  search(@Query('q') query: string) {
+    return this.itemsBankService.searchBanks(query);
   }
 
   @Post('situation')
@@ -48,16 +54,54 @@ export class ItemsBankController {
     return this.itemsBankService.reorderItems(reorderItemsDto);
   }
 
+  @Patch('reorder-situations')
+  reorderSituations(@Body() reorderSituationsDto: any) {
+    return this.itemsBankService.reorderSituations(reorderSituationsDto);
+  }
+
   @Post('answer-option')
   createAnswerOption(@Body() createAnswerOptionDto: CreateAnswerOptionDto) {
     return this.itemsBankService.createAnswerOption(createAnswerOptionDto);
   }
 
+  @Post('bulk-questions')
+  createBulkQuestions(@Body() createBulkQuestionsDto: CreateBulkQuestionsDto) {
+    return this.itemsBankService.createBulkQuestions(createBulkQuestionsDto);
+  }
+
+  @Post('situation/:situation_id/questions')
+  addQuestionsToSituation(@Param('situation_id') situation_id: string, @Body() addQuestionsDto: any) {
+    return this.itemsBankService.addQuestionsToSituation({
+      situation_id: +situation_id,
+      ...addQuestionsDto
+    });
+  }
+
+  @Patch('situation/:id')
+  updateSituation(@Param('id') id: string, @Body() updateData: Partial<CreateSituationDto>) {
+    return this.itemsBankService.updateSituation(+id, updateData);
+  }
+
+  @Delete('situation/:id')
+  deleteSituation(@Param('id') id: string) {
+    return this.itemsBankService.deleteSituation(+id);
+  }
+
+  @Patch('item/:id')
+  updateItem(@Param('id') id: string, @Body() updateData: any) {
+    return this.itemsBankService.updateItem(+id, updateData);
+  }
+
+  @Delete('item/:id')
+  deleteItem(@Param('id') id: string) {
+    return this.itemsBankService.deleteItem(+id);
+  }
 
 
-  @Get()
-  findAll() {
-    return this.itemsBankService.findAll();
+
+  @Get(':id/items')
+  getItemBankItems(@Param('id') id: string) {
+    return this.itemsBankService.getItemBankItems(+id);
   }
 
   @Get(':id')
@@ -73,5 +117,39 @@ export class ItemsBankController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.itemsBankService.remove(+id);
+  }
+
+  // ==================== CAT Management Endpoints ====================
+
+  /**
+   * ดึงข้อสอบทั้งหมดที่มี IRT parameters ครบ พร้อมข้อมูล item bank
+   */
+  @Get('cat/items-with-irt')
+  getItemsWithIRT() {
+    return this.itemsBankService.getItemsWithIRTParameters();
+  }
+
+  /**
+   * ดึงข้อสอบที่มี IRT parameters ในชุดข้อสอบเฉพาะ
+   */
+  @Get(':id/cat/items-with-irt')
+  getItemBankItemsWithIRT(@Param('id') id: string) {
+    return this.itemsBankService.getItemBankItemsWithIRT(+id);
+  }
+
+  /**
+   * อัพเดท IRT parameters แบบ batch (หลายข้อพร้อมกัน)
+   */
+  @Patch('cat/batch-update-irt')
+  batchUpdateIRTParameters(@Body() updateData: any) {
+    return this.itemsBankService.batchUpdateIRTParameters(updateData);
+  }
+
+  /**
+   * ดู CAT readiness summary ของทุก item banks
+   */
+  @Get('cat/readiness-summary')
+  getCATReadinessSummary() {
+    return this.itemsBankService.getCATReadinessSummary();
   }
 }

@@ -1,7 +1,7 @@
 import {
     Entity,
     Column,
-    PrimaryColumn,
+    PrimaryGeneratedColumn,
     CreateDateColumn,
     UpdateDateColumn,
     ManyToOne,
@@ -12,10 +12,10 @@ import { Item } from '../entities/items.entity';
 
 @Entity('answer_options')
 export class AnswerOption {
-    @PrimaryColumn({ type: 'integer' })
+    @PrimaryGeneratedColumn()
     option_id: number;
 
-    @PrimaryColumn({ type: 'integer' })
+    @Column({ type: 'integer' })
     item_id: number;
 
     @ManyToOne(() => Item)
@@ -26,6 +26,7 @@ export class AnswerOption {
     option_text: string;
 
     @Column({ type: 'boolean' })
+    is_correct: boolean;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;

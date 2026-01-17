@@ -15,7 +15,7 @@ export class ItemSituation {
     @PrimaryGeneratedColumn()
     situation_id: number;
 
-    @Column({ type: 'integer'})
+    @Column({ type: 'integer' })
     item_bank_id: number;
 
     @ManyToOne(() => ItemsBank)
@@ -23,13 +23,13 @@ export class ItemSituation {
     item_bank: ItemsBank;
 
     @Column({ type: 'varchar', length: 255 })
-    situation_title: string;
-
-    @Column({ type: 'varchar', length: 255 })
     situation_text: string;
 
     @Column({ type: 'varchar', length: 255 })
     situation_image_url: string;
+
+    @Column({ type: 'integer', default: 1 })
+    display_order: number;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;

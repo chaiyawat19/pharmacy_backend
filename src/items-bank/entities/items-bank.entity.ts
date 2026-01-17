@@ -17,6 +17,12 @@ export class ItemsBank {
   @Column({ type: 'varchar', length: 255 })
   description: string;
 
+  @Column({ type: 'int8'})
+  duration: number;
+
+  @Column({ type: 'boolean'})
+  is_active: boolean;
+
   @CreateDateColumn({ type: 'timestamp with time zone' })
   created_at: Date;
 

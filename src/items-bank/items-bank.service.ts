@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateItemsBankDto } from './dto/create-items-bank.dto';
 import { CreateSituationDto } from './dto/create-situation.dto';
 import { UpdateItemsBankDto } from './dto/update-items-bank.dto';
@@ -7,12 +7,18 @@ import { ReorderItemsDto } from './dto/reorder-items.dto';
 import { ItemsBank } from './entities/items-bank.entity';
 import { ItemSituation } from './entities/item_situations.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository, In, ILike } from 'typeorm';
 import { Item } from './entities/items.entity';
 import { ItemBankItem } from './entities/item_bank_items.entity';
 import { AnswerOption } from './entities/answer_options.entity';
 import { CreateAnswerOptionDto } from './dto/answer_options.dto';
 import { ItemSubTopic } from './entities/item_sub_topics.entity';
+import { CreateBulkQuestionsDto } from './dto/create-bulk-questions.dto';
+import { ItemBankCategory } from './entities/item_bank_category.entity';
+import { ExamSession } from './entities/exam-session.entity';
+import { ExamResponse } from './entities/exam-response.entity';
+import { StartExamDto, SubmitExamDto } from './dto/exam.dto';
+import { UserItemMastery } from './entities/user_item_mastery.entity';
 
 @Injectable()
 export class ItemsBankService {
@@ -29,19 +35,98 @@ export class ItemsBankService {
     private readonly answerOptionRepo: Repository<AnswerOption>,
     @InjectRepository(ItemSubTopic)
     private readonly itemSubTopicRepo: Repository<ItemSubTopic>,
+    @InjectRepository(ItemBankCategory)
+    private readonly itemBankCategoryRepo: Repository<ItemBankCategory>,
+    @InjectRepository(ExamSession)
+    private readonly examSessionRepo: Repository<ExamSession>,
+    @InjectRepository(ExamResponse)
+    private readonly examResponseRepo: Repository<ExamResponse>,
+    @InjectRepository(UserItemMastery)
+    private readonly userItemMasteryRepo: Repository<UserItemMastery>,
+    private readonly dataSource: DataSource,
   ) { }
 
-  createBank(createItemsBankDto: CreateItemsBankDto) {
-    const bank = this.bankRepo.create(createItemsBankDto);
-    return this.bankRepo.save(bank);
+  async createBank(createItemsBankDto: CreateItemsBankDto) {
+    const { category_ids, ...bankData } = createItemsBankDto;
+
+    // สร้าง item bank
+    const bank = this.bankRepo.create(bankData);
+    const savedBank = await this.bankRepo.save(bank);
+
+    // ถ้ามี category_ids ให้บันทึกลง item_bank_category
+    if (category_ids && category_ids.length > 0) {
+      const categoryRelations = category_ids.map(category_id =>
+        this.itemBankCategoryRepo.create({
+          item_bank_id: savedBank.item_bank_id,
+          category_id: category_id
+        })
+      );
+      await this.itemBankCategoryRepo.save(categoryRelations);
+    }
+
+    return savedBank;
   }
 
-  getBank() {
-    return this.bankRepo.find();
+  async getBank() {
+    const banks = await this.bankRepo.find({
+      order: { item_bank_id: 'ASC' }
+    });
+
+    return this.enrichBanksWithDetails(banks);
   }
 
-  createSituation(createSituationDto: CreateSituationDto) {
-    const situation = this.situationRepo.create(createSituationDto);
+  async searchBanks(query: string) {
+    // ตัดช่องว่างออกจากคำค้นหา
+    const cleanQuery = query.replace(/\s+/g, '');
+
+    const banks = await this.bankRepo
+      .createQueryBuilder('bank')
+      // ตัดช่องว่างจาก bank_name และ description แล้วเปรียบเทียบแบบ ILike
+      .where("REPLACE(bank.bank_name, ' ', '') ILIKE :query", { query: `%${cleanQuery}%` })
+      .orWhere("REPLACE(bank.description, ' ', '') ILIKE :query", { query: `%${cleanQuery}%` })
+      .orderBy('bank.item_bank_id', 'ASC')
+      .getMany();
+
+    return this.enrichBanksWithDetails(banks);
+  }
+
+  private async enrichBanksWithDetails(banks: ItemsBank[]) {
+    // ดึง categories และนับจำนวนข้อสอบสำหรับแต่ละ bank
+    const banksWithCategories = await Promise.all(
+      banks.map(async (bank) => {
+        const categoryRelations = await this.itemBankCategoryRepo.find({
+          where: { item_bank_id: bank.item_bank_id },
+          relations: ['category']
+        });
+
+        const categories = categoryRelations.map(rel => rel.category);
+
+        // นับจำนวนข้อสอบจาก item_bank_items
+        const totalItems = await this.itemBankItemRepo.count({
+          where: { item_bank_id: bank.item_bank_id }
+        });
+
+        return {
+          ...bank,
+          categories: categories,
+          total_items: totalItems
+        };
+      })
+    );
+
+    return banksWithCategories;
+  }
+
+  async createSituation(createSituationDto: CreateSituationDto) {
+    // นับจำนวนสถานการณ์ที่มีอยู่แล้วใน item bank นี้
+    const existingSituationsCount = await this.situationRepo.count({
+      where: { item_bank_id: createSituationDto.item_bank_id }
+    });
+
+    const situation = this.situationRepo.create({
+      ...createSituationDto,
+      display_order: existingSituationsCount + 1
+    });
     return this.situationRepo.save(situation);
   }
 
@@ -96,7 +181,22 @@ export class ItemsBankService {
 
     await Promise.all(updates);
 
-    return { message: 'Reorder successful' };
+    return { message: 'Reorder items successful' };
+  }
+
+  async reorderSituations(reorderSituationsDto: any) {
+    const { item_bank_id, sorted_situation_ids } = reorderSituationsDto;
+
+    const updates = sorted_situation_ids.map((situation_id, index) => {
+      return this.situationRepo.update(
+        { item_bank_id: item_bank_id, situation_id: situation_id },
+        { display_order: index + 1 }
+      );
+    });
+
+    await Promise.all(updates);
+
+    return { message: 'Reorder situations successful' };
   }
 
 
@@ -105,20 +205,1235 @@ export class ItemsBankService {
     return this.answerOptionRepo.save(answerOption);
   }
 
+  /**
+   * บันทึก situation พร้อมกับหลายคำถามและคำตอบในครั้งเดียว
+   * ใช้ Transaction เพื่อให้แน่ใจว่าข้อมูลจะถูกบันทึกทั้งหมดหรือไม่บันทึกเลย
+   */
+  async createBulkQuestions(createBulkQuestionsDto: CreateBulkQuestionsDto) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const { item_bank_id, situation_text, situation_image_url, questions } = createBulkQuestionsDto;
+
+      // 1. สร้าง Situation
+      // นับจำนวนสถานการณ์ที่มีอยู่แล้วเพื่อกำหนด display_order
+      const existingSituationsCount = await queryRunner.manager.count(ItemSituation, {
+        where: { item_bank_id }
+      });
+
+      const situation = queryRunner.manager.create(ItemSituation, {
+        item_bank_id,
+        situation_text,
+        situation_image_url: situation_image_url || '',
+        display_order: existingSituationsCount + 1,
+      });
+      const savedSituation = await queryRunner.manager.save(situation);
+
+      const savedItems: Item[] = [];
+
+      // 2. วนลูปสร้างแต่ละคำถาม
+      for (let i = 0; i < questions.length; i++) {
+        const questionData = questions[i];
+        const { answer_options, sub_topic_id, ...itemData } = questionData;
+
+        // 2.1 สร้าง Item
+        const item = queryRunner.manager.create(Item, {
+          ...itemData,
+          situation_id: savedSituation.situation_id,
+          irt_a_discrimination: itemData.irt_a_discrimination || 0,
+          irt_b_difficulty: itemData.irt_b_difficulty || 0,
+          irt_c_guessing: itemData.irt_c_guessing || 0,
+        });
+        const savedItem = await queryRunner.manager.save(item);
+
+        // 2.2 สร้างความสัมพันธ์ใน item_bank_items
+        const itemBankItem = queryRunner.manager.create(ItemBankItem, {
+          item_bank_id,
+          item_id: savedItem.item_id,
+          display_order: i + 1, // เรียงตามลำดับที่ส่งมา
+        });
+        await queryRunner.manager.save(itemBankItem);
+
+        // 2.3 ถ้ามี sub_topic_id ให้สร้างความสัมพันธ์ใน item_sub_topics
+        if (sub_topic_id) {
+          const itemSubTopic = queryRunner.manager.create(ItemSubTopic, {
+            item_id: savedItem.item_id,
+            sub_topic_id,
+          });
+          await queryRunner.manager.save(itemSubTopic);
+        }
+
+        // สร้าง Answer Options สำหรับคำถามนี้
+        for (let j = 0; j < answer_options.length; j++) {
+          const answerData = answer_options[j];
+          const answerOption = queryRunner.manager.create(AnswerOption, {
+            item_id: savedItem.item_id,
+            option_text: answerData.option_text,
+            is_correct: answerData.is_correct,
+          });
+          await queryRunner.manager.save(answerOption);
+        }
+
+        savedItems.push(savedItem);
+      }
+
+      // Commit transaction
+      await queryRunner.commitTransaction();
+
+      return {
+        message: 'สร้างคำถามทั้งหมดสำเร็จ',
+        situation: savedSituation,
+        items: savedItems,
+        total_questions: savedItems.length,
+      };
+    } catch (error) {
+      // Rollback transaction ถ้ามีข้อผิดพลาด
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      // ปล่อย queryRunner
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * เพิ่มคำถามใหม่เข้าใน situation ที่มีอยู่แล้ว
+   */
+  async addQuestionsToSituation(addQuestionsDto: any) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const { situation_id, item_bank_id, questions } = addQuestionsDto;
+
+      // ตรวจสอบว่า situation มีอยู่จริง
+      const situation = await this.situationRepo.findOne({ where: { situation_id } });
+      if (!situation) {
+        throw new NotFoundException(`ไม่พบสถานการณ์ ID ${situation_id}`);
+      }
+
+      const savedItems: Item[] = [];
+
+      // นับจำนวนคำถามที่มีอยู่แล้วใน item bank เพื่อกำหนด display_order
+      const existingItemsCount = await this.itemBankItemRepo.count({
+        where: { item_bank_id }
+      });
+
+      // วนลูปสร้างแต่ละคำถาม
+      for (let i = 0; i < questions.length; i++) {
+        const questionData = questions[i];
+        const { answer_options, sub_topic_id, ...itemData } = questionData;
+
+        // สร้าง Item
+        const item = queryRunner.manager.create(Item, {
+          ...itemData,
+          situation_id: situation_id,
+          irt_a_discrimination: itemData.irt_a_discrimination || 0,
+          irt_b_difficulty: itemData.irt_b_difficulty || 0,
+          irt_c_guessing: itemData.irt_c_guessing || 0,
+        });
+        const savedItem = await queryRunner.manager.save(item);
+
+        // สร้างความสัมพันธ์ใน item_bank_items
+        const itemBankItem = queryRunner.manager.create(ItemBankItem, {
+          item_bank_id,
+          item_id: savedItem.item_id,
+          display_order: existingItemsCount + i + 1, // เพิ่มต่อจากที่มีอยู่
+        });
+        await queryRunner.manager.save(itemBankItem);
+
+        // ถ้ามี sub_topic_id ให้สร้างความสัมพันธ์ใน item_sub_topics
+        if (sub_topic_id) {
+          const itemSubTopic = queryRunner.manager.create(ItemSubTopic, {
+            item_id: savedItem.item_id,
+            sub_topic_id,
+          });
+          await queryRunner.manager.save(itemSubTopic);
+        }
+
+        // สร้าง Answer Options สำหรับคำถามนี้
+        for (let j = 0; j < answer_options.length; j++) {
+          const answerData = answer_options[j];
+          const answerOption = queryRunner.manager.create(AnswerOption, {
+            item_id: savedItem.item_id,
+            option_text: answerData.option_text,
+            is_correct: answerData.is_correct,
+          });
+          await queryRunner.manager.save(answerOption);
+        }
+
+        savedItems.push(savedItem);
+      }
+
+      // Commit transaction
+      await queryRunner.commitTransaction();
+
+      return {
+        message: 'เพิ่มคำถามใหม่สำเร็จ',
+        situation_id: situation_id,
+        items: savedItems,
+        total_questions: savedItems.length,
+      };
+    } catch (error) {
+      // Rollback transaction ถ้ามีข้อผิดพลาด
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      // ปล่อย queryRunner
+      await queryRunner.release();
+    }
+  }
+
   findAll() {
     return `This action returns all itemsBank`;
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} itemsBank`;
+  /**
+   * ดึงข้อมูลคำถามทั้งหมดในคลังข้อสอบ พร้อมข้อมูลที่เกี่ยวข้อง
+   * @param item_bank_id - ID ของคลังข้อสอบ
+   * @returns รายการคำถามทั้งหมดพร้อมข้อมูลที่เกี่ยวข้อง
+   */
+  async getItemBankItems(item_bank_id: number) {
+    // ตรวจสอบว่าคลังข้อสอบมีอยู่จริง
+    const bank = await this.bankRepo.findOne({
+      where: { item_bank_id }
+    });
+
+    if (!bank) {
+      throw new NotFoundException(`Item bank with ID ${item_bank_id} not found`);
+    }
+
+    // ดึงข้อมูลคำถามทั้งหมดในคลังข้อสอบ
+    const itemBankItems = await this.itemBankItemRepo.find({
+      where: { item_bank_id },
+      relations: ['item', 'item.situation'],
+    });
+
+    // เรียงลำดับ: 
+    // 1. เรียงตาม display_order ของ situation (ถ้าไม่มีให้ใช้ 0)
+    // 2. ถ้า display_order เท่ากัน ให้เรียงตาม situation_id (เพื่อรองรับข้อมูลเก่าที่ยังไม่ได้จัดลำดับ)
+    // 3. ถ้าอยู่ situation เดียวกัน ให้เรียงตาม display_order ของ item_bank_items
+    itemBankItems.sort((a, b) => {
+      const sitOrderA = a.item?.situation?.display_order ?? 0;
+      const sitOrderB = b.item?.situation?.display_order ?? 0;
+
+      if (sitOrderA !== sitOrderB) {
+        return sitOrderA - sitOrderB;
+      }
+
+      const sitIdA = a.item?.situation_id ?? 0;
+      const sitIdB = b.item?.situation_id ?? 0;
+
+      if (sitIdA !== sitIdB) {
+        return sitIdA - sitIdB;
+      }
+
+      return a.display_order - b.display_order;
+    });
+
+    // ดึงข้อมูลเพิ่มเติมสำหรับแต่ละคำถาม
+    const itemsWithDetails = await Promise.all(
+      itemBankItems.map(async (itemBankItem) => {
+        const item = itemBankItem.item;
+
+        // ดึง answer options
+        const answerOptions = await this.answerOptionRepo.find({
+          where: { item_id: item.item_id },
+          order: { option_id: 'ASC' }
+        });
+
+        // ดึง sub topics
+        const itemSubTopics = await this.itemSubTopicRepo.find({
+          where: { item_id: item.item_id },
+          relations: ['sub_topic', 'sub_topic.topic']
+        });
+
+        return {
+          item_id: item.item_id,
+          question_text: item.question_text,
+          question_type: item.question_type,
+          explanation: item.explanation,
+          status: item.status,
+          display_order: itemBankItem.display_order,
+          irt_a_discrimination: item.irt_a_discrimination,
+          irt_b_difficulty: item.irt_b_difficulty,
+          irt_c_guessing: item.irt_c_guessing,
+          created_at: item.created_at,
+          updated_at: item.updated_at,
+          situation: item.situation ? {
+            situation_id: item.situation.situation_id,
+            situation_text: item.situation.situation_text,
+            situation_image_url: item.situation.situation_image_url
+          } : null,
+          answer_options: answerOptions.map(option => ({
+            option_id: option.option_id,
+            option_text: option.option_text,
+            is_correct: option.is_correct
+          })),
+          sub_topics: itemSubTopics.map(ist => ({
+            sub_topic_id: ist.sub_topic.sub_topic_id,
+            sub_topic_name: ist.sub_topic.sub_topic_name,
+            topic: ist.sub_topic.topic ? {
+              topic_id: ist.sub_topic.topic.topic_id,
+              topic_name: ist.sub_topic.topic.topic_name
+            } : null
+          }))
+        };
+      })
+    );
+
+    return {
+      item_bank_id: bank.item_bank_id,
+      bank_name: bank.bank_name,
+      description: bank.description,
+      duration: bank.duration,
+      is_active: bank.is_active,
+      total_items: itemsWithDetails.length,
+      items: itemsWithDetails
+    };
   }
 
-  update(id: number, updateItemsBankDto: UpdateItemsBankDto) {
-    return `This action updates a #${id} itemsBank`;
+  async findOne(id: number) {
+    const bank = await this.bankRepo.findOne({
+      where: { item_bank_id: id }
+    });
+
+    if (!bank) {
+      throw new NotFoundException(`Item bank with ID ${id} not found`);
+    }
+
+    // ดึง categories
+    const categoryRelations = await this.itemBankCategoryRepo.find({
+      where: { item_bank_id: id },
+      relations: ['category']
+    });
+
+    const categories = categoryRelations.map(rel => rel.category);
+
+    return {
+      ...bank,
+      item_bank_id: bank.item_bank_id, // เพิ่ม alias เพื่อให้ตรงกับ frontend (data.bank_id)
+      categories: categories
+    };
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} itemsBank`;
+  async update(id: number, updateItemsBankDto: UpdateItemsBankDto) {
+    const { category_ids, ...bankData } = updateItemsBankDto;
+
+    // Update bank data
+    await this.bankRepo.update({ item_bank_id: id }, bankData);
+
+    // Update categories if provided
+    if (category_ids) {
+      // Delete old relations
+      await this.itemBankCategoryRepo.delete({ item_bank_id: id });
+
+      // Add new relations
+      if (category_ids.length > 0) {
+        const categoryRelations = category_ids.map(category_id =>
+          this.itemBankCategoryRepo.create({
+            item_bank_id: id,
+            category_id: category_id
+          })
+        );
+        await this.itemBankCategoryRepo.save(categoryRelations);
+      }
+    }
+
+    return this.findOne(id);
+  }
+
+  async remove(id: number) {
+    const queryRunner = this.bankRepo.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. หา Sessions ทั้งหมดที่เกี่ยวข้องกับ Bank นี้
+      const sessions = await this.examSessionRepo.find({ where: { itemBankId: id } });
+      const sessionIds = sessions.map(s => s.session_id);
+
+      // 2. ลบ Exam Responses (ถ้ามี sessions)
+      if (sessionIds.length > 0) {
+        await this.examResponseRepo.delete({ session_id: In(sessionIds) });
+        // 3. ลบ Exam Sessions
+        await this.examSessionRepo.delete({ itemBankId: id });
+      }
+
+      // 4. ลบความสัมพันธ์อื่นๆ
+      await this.itemBankCategoryRepo.delete({ item_bank_id: id });
+      await this.itemBankItemRepo.delete({ item_bank_id: id });
+
+      // 4.5 ลบ Situations ที่ผูกกับ Item Bank นี้ (ซึ่งจะลบ Items ภายใต้ Situation นั้นด้วย)
+      const situations = await this.situationRepo.find({ where: { item_bank_id: id } });
+      for (const situation of situations) {
+        // ใช้ logic เดียวกับ deleteSituation แต่เขียนใหม่ใน transaction นี้เพื่อให้ rollback ได้ถ้าพลาด
+        const itemsInSituation = await this.itemRepo.find({ where: { situation_id: situation.situation_id } });
+
+        for (const item of itemsInSituation) {
+          await this.answerOptionRepo.delete({ item_id: item.item_id });
+          await this.itemSubTopicRepo.delete({ item_id: item.item_id });
+          await this.itemBankItemRepo.delete({ item_id: item.item_id });
+          await this.itemRepo.delete({ item_id: item.item_id });
+        }
+
+        await this.situationRepo.delete({ situation_id: situation.situation_id });
+      }
+
+      // 5. ลบ Item Bank
+      const result = await this.bankRepo.delete({ item_bank_id: id });
+
+      await queryRunner.commitTransaction();
+
+      return {
+        message: (result.affected ?? 0) > 0 ? 'ลบคลังข้อสอบสำเร็จ' : 'ไม่พบคลังข้อสอบที่ต้องการลบ',
+        success: (result.affected ?? 0) > 0
+      };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async deleteSituation(situation_id: number) {
+    // หาคำถามทั้งหมดในสถานการณ์นี้
+    const items = await this.itemRepo.find({ where: { situation_id } });
+
+    // ลบคำถามแต่ละข้อพร้อมข้อมูลที่เกี่ยวข้อง
+    for (const item of items) {
+      // ลบ answer options
+      await this.answerOptionRepo.delete({ item_id: item.item_id });
+
+      // ลบ item_sub_topics
+      await this.itemSubTopicRepo.delete({ item_id: item.item_id });
+
+      // ลบ item_bank_items
+      await this.itemBankItemRepo.delete({ item_id: item.item_id });
+
+      // ลบ item
+      await this.itemRepo.delete({ item_id: item.item_id });
+    }
+
+    // ลบสถานการณ์
+    const result = await this.situationRepo.delete({ situation_id });
+
+    return {
+      message: (result.affected ?? 0) > 0 ? 'ลบสถานการณ์สำเร็จ' : 'ไม่พบสถานการณ์ที่ต้องการลบ',
+      success: (result.affected ?? 0) > 0,
+      deleted_items: items.length
+    };
+  }
+
+  async updateSituation(situation_id: number, updateData: Partial<CreateSituationDto>) {
+    const situation = await this.situationRepo.findOne({ where: { situation_id } });
+
+    if (!situation) {
+      throw new NotFoundException(`ไม่พบสถานการณ์ ID ${situation_id}`);
+    }
+
+    await this.situationRepo.update({ situation_id }, updateData);
+
+    return {
+      message: 'อัพเดทสถานการณ์สำเร็จ',
+      situation: await this.situationRepo.findOne({ where: { situation_id } })
+    };
+  }
+
+  async updateItem(item_id: number, updateData: any) {
+    const item = await this.itemRepo.findOne({ where: { item_id } });
+
+    if (!item) {
+      throw new NotFoundException(`ไม่พบคำถาม ID ${item_id}`);
+    }
+
+    // แยกข้อมูลที่ไม่ใช่ของ item entity
+    const { sub_topic_id, answer_options, ...itemData } = updateData;
+
+    // Update item
+    await this.itemRepo.update({ item_id }, itemData);
+
+    // Update sub_topic ถ้ามีการเปลี่ยนแปลง
+    if (sub_topic_id !== undefined) {
+      // ลบ sub_topic เก่า
+      await this.itemSubTopicRepo.delete({ item_id });
+
+      // เพิ่ม sub_topic ใหม่ (ถ้ามี)
+      if (sub_topic_id) {
+        const itemSubTopic = this.itemSubTopicRepo.create({
+          item_id,
+          sub_topic_id: Number(sub_topic_id)
+        });
+        await this.itemSubTopicRepo.save(itemSubTopic);
+      }
+    }
+
+    // Update answer options ถ้ามี
+    if (answer_options && Array.isArray(answer_options)) {
+      // ลบ answer options เก่าทั้งหมด
+      await this.answerOptionRepo.delete({ item_id });
+
+      // เพิ่ม answer options ใหม่
+      for (let i = 0; i < answer_options.length; i++) {
+        const answerOption = this.answerOptionRepo.create({
+          item_id,
+          option_text: answer_options[i].option_text,
+          is_correct: answer_options[i].is_correct
+        });
+        await this.answerOptionRepo.save(answerOption);
+      }
+    }
+
+    return {
+      message: 'อัพเดทคำถามสำเร็จ',
+      item: await this.itemRepo.findOne({ where: { item_id } })
+    };
+  }
+
+  /**
+   * ลบคำถาม (Item) ออกจากระบบ
+   * จะลบข้อมูลที่เกี่ยวข้องทั้งหมด:
+   * - Exam responses (ประวัติการตอบ)
+   * - Answer options
+   * - Item sub topics
+   * - Item bank items (ความสัมพันธ์กับ item bank)
+   * - User item mastery (สถิติการตอบของผู้ใช้)
+   * - Item เอง
+   */
+  async deleteItem(item_id: number) {
+    const item = await this.itemRepo.findOne({ where: { item_id } });
+
+    if (!item) {
+      throw new NotFoundException(`ไม่พบคำถาม ID ${item_id}`);
+    }
+
+    // ลบข้อมูลที่เกี่ยวข้อง (ต้องลบตามลำดับ foreign key)
+    // 1. ลบ exam_responses ก่อน (เพราะ reference ไป item)
+    await this.examResponseRepo.delete({ item_id });
+
+    // 2. ลบข้อมูลอื่นๆ
+    await this.answerOptionRepo.delete({ item_id });
+    await this.itemSubTopicRepo.delete({ item_id });
+    await this.itemBankItemRepo.delete({ item_id });
+    await this.userItemMasteryRepo.delete({ item_id });
+
+    // 3. ลบคำถาม
+    const result = await this.itemRepo.delete({ item_id });
+
+    return {
+      message: (result.affected ?? 0) > 0 ? 'ลบคำถามสำเร็จ' : 'ไม่พบคำถามที่ต้องการลบ',
+      success: (result.affected ?? 0) > 0,
+      item_id
+    };
+  }
+
+
+  // ==================== Exam Management ====================
+
+  async startExam(userId: number, startExamDto: StartExamDto) {
+    const { item_bank_id } = startExamDto;
+
+    // ตรวจสอบว่า item bank มีอยู่จริง
+    const itemBank = await this.bankRepo.findOne({ where: { item_bank_id } });
+    if (!itemBank) {
+      throw new NotFoundException(`ไม่พบคลังข้อสอบ ID ${item_bank_id}`);
+    }
+
+    // สร้าง exam session ใหม่
+
+    const session = this.examSessionRepo.create({
+      userId: userId,
+      itemBankId: item_bank_id,
+      status: 'IN_PROGRESS'
+    });
+
+    const savedSession = await this.examSessionRepo.save(session);
+
+    return {
+      message: 'เริ่มทำข้อสอบสำเร็จ',
+      session_id: Number(savedSession.session_id),
+      item_bank_id: savedSession.itemBankId,
+      start_time: savedSession.start_time
+    };
+  }
+
+  async submitExam(userId: number, sessionId: number, submitExamDto: SubmitExamDto) {
+    // ตรวจสอบ session
+    const session = await this.examSessionRepo.findOne({
+      where: { session_id: sessionId, userId: userId }
+    });
+
+    if (!session) {
+      throw new NotFoundException(`ไม่พบ session ID ${sessionId}`);
+    }
+
+    const { answers } = submitExamDto;
+    let correctCount = 0;
+    let totalQuestions = answers.length;
+
+    // บันทึกคำตอบแต่ละข้อ
+    for (let i = 0; i < answers.length; i++) {
+      const answer = answers[i];
+
+      // ดึงข้อมูลคำถาม
+      const item = await this.itemRepo.findOne({
+        where: { item_id: answer.item_id },
+        relations: ['answer_options']
+      });
+
+      if (!item) continue;
+
+      // หาคำตอบที่ถูกต้อง
+      const correctOption = item.answer_options?.find(opt => opt.is_correct);
+
+      // แปลงเป็น number เพื่อให้แน่ใจว่าเปรียบเทียบถูกต้อง
+      const selectedId = answer.selected_option_id ? Number(answer.selected_option_id) : null;
+      const correctId = correctOption?.option_id ? Number(correctOption.option_id) : null;
+      const isCorrect = selectedId === correctId;
+      if (isCorrect) correctCount++;
+
+      // บันทึก response
+      const response = this.examResponseRepo.create({
+        session_id: sessionId,
+        item_id: answer.item_id,
+        selected_option_id: selectedId,
+        is_correct: isCorrect,
+        order_presented: i + 1,
+        response_time_ms: answer.response_time_ms,
+        irt_a_param: item.irt_a_discrimination,
+        irt_b_param: item.irt_b_difficulty,
+        irt_c_param: item.irt_c_guessing
+      });
+
+      await this.examResponseRepo.save(response);
+
+      // อัพเดทสถิติการตอบคำถามของผู้ใช้
+      await this.updateUserItemMastery(userId, answer.item_id, isCorrect);
+    }
+
+    // คำนวณคะแนน
+    const finalScore = (correctCount / totalQuestions) * 100;
+
+    // อัพเดท session
+    await this.examSessionRepo.update(
+      { session_id: sessionId },
+      {
+        status: 'COMPLETED',
+        end_time: new Date(),
+        final_score: finalScore
+      }
+    );
+
+    return {
+      message: 'ส่งข้อสอบสำเร็จ',
+      session_id: sessionId,
+      total_questions: totalQuestions,
+      correct_count: correctCount,
+      final_score: finalScore,
+      percentage: Math.round(finalScore * 100) / 100
+    };
+  }
+
+  /**
+   * อัพเดทสถิติการตอบคำถามของผู้ใช้
+   */
+  async updateUserItemMastery(userId: number, itemId: number, isCorrect: boolean) {
+    // ตรวจสอบว่าเคยมีข้อมูลหรือยัง
+    let mastery = await this.userItemMasteryRepo.findOne({
+      where: { user_id: userId, item_id: itemId }
+    });
+
+    if (mastery) {
+      // มีข้อมูลแล้ว - อัพเดท
+      mastery.total_attempts += 1;
+
+      if (isCorrect) {
+        mastery.total_correct += 1;
+        mastery.correct_streak += 1;
+      } else {
+        mastery.total_incorrect += 1;
+        mastery.correct_streak = 0; // รีเซ็ต streak
+      }
+
+      mastery.last_answered_at = new Date();
+
+      await this.userItemMasteryRepo.save(mastery);
+    } else {
+      // ยังไม่มีข้อมูล - สร้างใหม่
+      mastery = this.userItemMasteryRepo.create({
+        user_id: userId,
+        item_id: itemId,
+        total_attempts: 1,
+        total_correct: isCorrect ? 1 : 0,
+        total_incorrect: isCorrect ? 0 : 1,
+        correct_streak: isCorrect ? 1 : 0,
+        last_answered_at: new Date()
+      });
+
+      await this.userItemMasteryRepo.save(mastery);
+    }
+
+    return mastery;
+  }
+
+  async getExamResult(userId: number, sessionId: number) {
+    const session = await this.examSessionRepo.findOne({
+      where: { session_id: sessionId, userId: userId },
+      relations: ['item_bank']
+    });
+
+    if (!session) {
+      throw new NotFoundException(`ไม่พบ session ID ${sessionId}`);
+    }
+
+    // ดึงคำตอบทั้งหมด
+    const responses = await this.examResponseRepo.find({
+      where: { session_id: sessionId },
+      relations: ['item', 'item.answer_options', 'item.situation'],
+      order: { order_presented: 'ASC' }
+    });
+
+    const totalQuestions = responses.length;
+    const correctCount = responses.filter(r => r.is_correct).length;
+
+    // ดึงข้อมูล sub_topics สำหรับแต่ละคำถาม และวิเคราะห์ตามหัวข้อ
+    const topicStats = new Map<string, { topic_id: number, topic_name: string, sub_topics: Map<number, { sub_topic_id: number, sub_topic_name: string, correct: number, total: number }> }>();
+
+    const responsesWithSubTopics = await Promise.all(
+      responses.map(async (r) => {
+        // ดึง sub topics ของคำถามนี้
+        const itemSubTopics = await this.itemSubTopicRepo.find({
+          where: { item_id: r.item_id },
+          relations: ['sub_topic', 'sub_topic.topic']
+        });
+
+        // วิเคราะห์สถิติตามหัวข้อ
+        itemSubTopics.forEach(ist => {
+          if (ist.sub_topic && ist.sub_topic.topic) {
+            const topicKey = `${ist.sub_topic.topic.topic_id}`;
+
+            if (!topicStats.has(topicKey)) {
+              topicStats.set(topicKey, {
+                topic_id: ist.sub_topic.topic.topic_id,
+                topic_name: ist.sub_topic.topic.topic_name,
+                sub_topics: new Map()
+              });
+            }
+
+            const topicData = topicStats.get(topicKey);
+            if (!topicData) return; // Skip if topicData is undefined
+
+            const subTopicKey = ist.sub_topic.sub_topic_id;
+
+            if (!topicData.sub_topics.has(subTopicKey)) {
+              topicData.sub_topics.set(subTopicKey, {
+                sub_topic_id: ist.sub_topic.sub_topic_id,
+                sub_topic_name: ist.sub_topic.sub_topic_name,
+                correct: 0,
+                total: 0
+              });
+            }
+
+            const subTopicData = topicData.sub_topics.get(subTopicKey);
+            if (!subTopicData) return; // Skip if subTopicData is undefined
+
+            subTopicData.total += 1;
+            if (r.is_correct) {
+              subTopicData.correct += 1;
+            }
+          }
+        });
+
+        return {
+          item_id: r.item_id,
+          question_text: r.item.question_text,
+          explanation: r.item.explanation,
+          selected_option_id: r.selected_option_id,
+          is_correct: r.is_correct,
+          response_time_ms: r.response_time_ms,
+          answer_options: r.item.answer_options,
+          situation: r.item.situation,
+          sub_topics: itemSubTopics.map(ist => ({
+            sub_topic_id: ist.sub_topic.sub_topic_id,
+            sub_topic_name: ist.sub_topic.sub_topic_name,
+            topic: {
+              topic_id: ist.sub_topic.topic.topic_id,
+              topic_name: ist.sub_topic.topic.topic_name
+            }
+          }))
+        };
+      })
+    );
+
+    // แปลง Map เป็น Array และคำนวณเปอร์เซ็นต์
+    const topicAnalysis = Array.from(topicStats.values()).map(topic => {
+      const subTopicsArray = Array.from(topic.sub_topics.values()).map(st => ({
+        sub_topic_id: st.sub_topic_id,
+        sub_topic_name: st.sub_topic_name,
+        correct: st.correct,
+        total: st.total,
+        accuracy: st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0
+      }));
+
+      const topicCorrect = subTopicsArray.reduce((sum, st) => sum + st.correct, 0);
+      const topicTotal = subTopicsArray.reduce((sum, st) => sum + st.total, 0);
+
+      return {
+        topic_id: topic.topic_id,
+        topic_name: topic.topic_name,
+        correct: topicCorrect,
+        total: topicTotal,
+        accuracy: topicTotal > 0 ? Math.round((topicCorrect / topicTotal) * 100) : 0,
+        sub_topics: subTopicsArray.sort((a, b) => a.accuracy - b.accuracy) // เรียงจุดอ่อนก่อน
+      };
+    }).sort((a, b) => a.accuracy - b.accuracy); // เรียงจุดอ่อนก่อน
+
+    return {
+      session_id: sessionId,
+      item_bank_name: session.item_bank.bank_name,
+      status: session.status,
+      start_time: session.start_time,
+      end_time: session.end_time,
+      total_questions: totalQuestions,
+      correct_count: correctCount,
+      final_score: session.final_score,
+      responses: responsesWithSubTopics,
+      topic_analysis: topicAnalysis // จุดแข็ง-จุดอ่อนตามหัวข้อ
+    };
+  }
+
+  async getUserExamHistory(userId: number, filters?: {
+    category_ids?: number[];
+    item_bank_id?: number;
+    status?: 'ALL' | 'COMPLETED' | 'IN_PROGRESS';
+  }) {
+    // สร้าง query builder
+    let query = this.examSessionRepo
+      .createQueryBuilder('session')
+      .leftJoinAndSelect('session.item_bank', 'item_bank')
+      .where('session.userId = :userId', { userId });
+
+    // ถ้ามีการกรองตาม item_bank_id
+    if (filters?.item_bank_id) {
+      query = query.andWhere('session.itemBankId = :itemBankId', {
+        itemBankId: filters.item_bank_id
+      });
+    }
+
+    // ถ้ามีการกรองตาม status
+    if (filters?.status && filters.status !== 'ALL') {
+      query = query.andWhere('session.status = :status', {
+        status: filters.status
+      });
+    }
+
+    // ถ้ามีการกรองตาม category
+    if (filters?.category_ids && filters.category_ids.length > 0) {
+      query = query
+        .innerJoin(
+          'item_bank_category',
+          'ibc',
+          'ibc.item_bank_id = item_bank.item_bank_id'
+        )
+        .andWhere('ibc.category_id IN (:...categoryIds)', {
+          categoryIds: filters.category_ids
+        });
+    }
+
+    query = query.orderBy('session.start_time', 'DESC');
+
+    const sessions = await query.getMany();
+
+    // ดึงข้อมูล categories ของแต่ละ item bank
+    const sessionWithCategories = await Promise.all(
+      sessions.map(async (session) => {
+        const categoryRelations = await this.itemBankCategoryRepo.find({
+          where: { item_bank_id: session.itemBankId },
+          relations: ['category']
+        });
+
+        return {
+          session_id: Number(session.session_id),
+          item_bank_id: session.itemBankId,
+          item_bank_name: session.item_bank.bank_name,
+          status: session.status,
+          start_time: session.start_time,
+          end_time: session.end_time,
+          final_score: session.final_score,
+          categories: categoryRelations.map(cr => ({
+            category_id: cr.category.category_id,
+            category_name: cr.category.category_name
+          }))
+        };
+      })
+    );
+
+    return sessionWithCategories;
+  }
+
+  /**
+   * ดึงรายการ categories ที่ผู้ใช้เคยทำข้อสอบ
+   */
+  async getUserExamCategories(userId: number) {
+    // ดึง session ทั้งหมดของ user
+    const sessions = await this.examSessionRepo.find({
+      where: { userId: userId },
+      select: ['itemBankId']
+    });
+
+    // ดึง item_bank_id ที่ไม่ซ้ำ
+    const itemBankIds = [...new Set(sessions.map(s => s.itemBankId))];
+
+    if (itemBankIds.length === 0) {
+      return [];
+    }
+
+    // ดึง categories ของ item banks เหล่านั้น
+    const categoryRelations = await this.itemBankCategoryRepo
+      .createQueryBuilder('ibc')
+      .innerJoinAndSelect('ibc.category', 'category')
+      .where('ibc.item_bank_id IN (:...itemBankIds)', { itemBankIds })
+      .getMany();
+
+    // ดึง categories ที่ไม่ซ้ำ
+    const uniqueCategories = new Map();
+    categoryRelations.forEach(rel => {
+      if (!uniqueCategories.has(rel.category.category_id)) {
+        uniqueCategories.set(rel.category.category_id, {
+          category_id: rel.category.category_id,
+          category_name: rel.category.category_name,
+          category_description: rel.category.category_description
+        });
+      }
+    });
+
+    return Array.from(uniqueCategories.values());
+  }
+
+
+  /**
+   * ดึงสถิติการตอบคำถามของผู้ใช้
+   */
+  async getUserItemMastery(userId: number, itemId?: number) {
+    if (itemId) {
+      // ดูสถิติของข้อเฉพาะ
+      return this.userItemMasteryRepo.findOne({
+        where: { user_id: userId, item_id: itemId }
+      });
+    } else {
+      // ดูสถิติทั้งหมดของผู้ใช้
+      return this.userItemMasteryRepo.find({
+        where: { user_id: userId },
+        order: { last_answered_at: 'DESC' }
+      });
+    }
+  }
+
+
+  // ==================== CAT Management Methods ====================
+
+  /**
+   * ดึงข้อสอบทั้งหมดที่มี IRT parameters ครบ พร้อมข้อมูล item bank
+   */
+  async getItemsWithIRTParameters() {
+    const allItemBankItems = await this.itemBankItemRepo.find({
+      relations: ['item', 'item.answer_options', 'item.situation', 'item_bank'],
+      order: { item_bank_id: 'ASC', display_order: 'ASC' },
+    });
+
+    const itemsWithIRT = allItemBankItems.filter((bbi) => {
+      const item = bbi.item;
+      return this.isValidIRTItem(item);
+    });
+
+    return itemsWithIRT.map((bbi) => ({
+      item_id: bbi.item.item_id,
+      question_text: bbi.item.question_text,
+      question_type: bbi.item.question_type,
+      irt_a_discrimination: bbi.item.irt_a_discrimination,
+      irt_b_difficulty: bbi.item.irt_b_difficulty,
+      irt_c_guessing: bbi.item.irt_c_guessing,
+      explanation: bbi.item.explanation,
+      status: bbi.item.status,
+      display_order: bbi.display_order,
+      situation: bbi.item.situation
+        ? {
+          situation_id: bbi.item.situation.situation_id,
+          situation_text: bbi.item.situation.situation_text,
+          situation_image_url: bbi.item.situation.situation_image_url,
+        }
+        : null,
+      item_bank: {
+        item_bank_id: bbi.item_bank.item_bank_id,
+        bank_name: bbi.item_bank.bank_name,
+        description: bbi.item_bank.description,
+      },
+      answer_options: bbi.item.answer_options?.map((opt) => ({
+        option_id: opt.option_id,
+        option_text: opt.option_text,
+        is_correct: opt.is_correct,
+      })),
+    }));
+  }
+
+  /**
+   * ดึงข้อสอบที่มี IRT parameters ในชุดข้อสอบเฉพาะ
+   */
+  async getItemBankItemsWithIRT(itemBankId: number) {
+    const itemBank = await this.bankRepo.findOne({
+      where: { item_bank_id: itemBankId },
+    });
+
+    if (!itemBank) {
+      throw new NotFoundException(`ไม่พบคลังข้อสอบ ID ${itemBankId}`);
+    }
+
+    const itemBankItems = await this.itemBankItemRepo.find({
+      where: { item_bank_id: itemBankId },
+      relations: ['item', 'item.answer_options', 'item.situation'],
+      order: { display_order: 'ASC' },
+    });
+
+    const itemsWithIRT = itemBankItems.filter((bbi) =>
+      this.isValidIRTItem(bbi.item),
+    );
+
+    const itemsWithoutIRT = itemBankItems.filter(
+      (bbi) => !this.isValidIRTItem(bbi.item),
+    );
+
+    return {
+      item_bank_id: itemBankId,
+      bank_name: itemBank.bank_name,
+      total_items: itemBankItems.length,
+      items_with_irt: itemsWithIRT.length,
+      items_without_irt: itemsWithoutIRT.length,
+      readiness_percentage: Math.round(
+        (itemsWithIRT.length / itemBankItems.length) * 100,
+      ),
+      items: itemsWithIRT.map((bbi) => ({
+        item_id: bbi.item.item_id,
+        question_text: bbi.item.question_text,
+        question_type: bbi.item.question_type,
+        irt_a_discrimination: bbi.item.irt_a_discrimination,
+        irt_b_difficulty: bbi.item.irt_b_difficulty,
+        irt_c_guessing: bbi.item.irt_c_guessing,
+        explanation: bbi.item.explanation,
+        status: bbi.item.status,
+        display_order: bbi.display_order,
+        situation: bbi.item.situation
+          ? {
+            situation_id: bbi.item.situation.situation_id,
+            situation_text: bbi.item.situation.situation_text,
+          }
+          : null,
+        answer_options: bbi.item.answer_options?.map((opt) => ({
+          option_id: opt.option_id,
+          option_text: opt.option_text,
+          is_correct: opt.is_correct,
+        })),
+      })),
+      items_missing_irt: itemsWithoutIRT.map((bbi) => ({
+        item_id: bbi.item.item_id,
+        question_text:
+          bbi.item.question_text?.substring(0, 100) + '...',
+        missing_params: this.getMissingIRTParams(bbi.item),
+      })),
+    };
+  }
+
+  /**
+   * อัพเดท IRT parameters แบบ batch
+   */
+  async batchUpdateIRTParameters(updateData: {
+    updates: Array<{
+      item_id: number;
+      irt_a_discrimination: number;
+      irt_b_difficulty: number;
+      irt_c_guessing: number;
+    }>;
+  }) {
+    const results: {
+      success: Array<{ item_id: number; message: string }>;
+      failed: Array<{ item_id: number; reason: string }>;
+    } = {
+      success: [],
+      failed: [],
+    };
+
+    for (const update of updateData.updates) {
+      try {
+        const item = await this.itemRepo.findOne({
+          where: { item_id: update.item_id },
+        });
+
+        if (!item) {
+          results.failed.push({
+            item_id: update.item_id,
+            reason: 'ไม่พบข้อสอบ',
+          });
+          continue;
+        }
+
+        // Validate IRT parameters
+        if (
+          update.irt_a_discrimination <= 0 ||
+          update.irt_c_guessing < 0 ||
+          update.irt_c_guessing >= 1
+        ) {
+          results.failed.push({
+            item_id: update.item_id,
+            reason: 'IRT parameters ไม่ถูกต้อง',
+          });
+          continue;
+        }
+
+        // Update
+        await this.itemRepo.update(
+          { item_id: update.item_id },
+          {
+            irt_a_discrimination: update.irt_a_discrimination,
+            irt_b_difficulty: update.irt_b_difficulty,
+            irt_c_guessing: update.irt_c_guessing,
+          },
+        );
+
+        results.success.push({
+          item_id: update.item_id,
+          message: 'อัพเดทสำเร็จ',
+        });
+      } catch (error) {
+        results.failed.push({
+          item_id: update.item_id,
+          reason: error.message,
+        });
+      }
+    }
+
+    return {
+      message: 'Batch update completed',
+      total: updateData.updates.length,
+      success_count: results.success.length,
+      failed_count: results.failed.length,
+      results,
+    };
+  }
+
+  /**
+   * ดู CAT readiness summary ของทุก item banks
+   */
+  async getCATReadinessSummary() {
+    const allBanks = await this.bankRepo.find({
+      order: { item_bank_id: 'ASC' },
+    });
+
+    const summary = await Promise.all(
+      allBanks.map(async (bank) => {
+        const itemBankItems = await this.itemBankItemRepo.find({
+          where: { item_bank_id: bank.item_bank_id },
+          relations: ['item'],
+        });
+
+        const totalItems = itemBankItems.length;
+        const itemsWithIRT = itemBankItems.filter((bbi) =>
+          this.isValidIRTItem(bbi.item),
+        ).length;
+        const itemsWithoutIRT = totalItems - itemsWithIRT;
+
+        const readinessPercentage =
+          totalItems > 0 ? Math.round((itemsWithIRT / totalItems) * 100) : 0;
+        const isReady = itemsWithIRT >= 20; // MIN_ITEMS_FOR_CAT
+
+        return {
+          item_bank_id: bank.item_bank_id,
+          bank_name: bank.bank_name,
+          total_items: totalItems,
+          items_with_irt: itemsWithIRT,
+          items_without_irt: itemsWithoutIRT,
+          readiness_percentage: readinessPercentage,
+          is_ready: isReady,
+          status: isReady
+            ? '✅ พร้อมใช้'
+            : itemsWithIRT > 0
+              ? `⚠️ ยังไม่พร้อม (${itemsWithIRT}/20)`
+              : '❌ ยังไม่มี IRT parameters',
+        };
+      }),
+    );
+
+    const totalReady = summary.filter((s) => s.is_ready).length;
+    const totalNotReady = summary.length - totalReady;
+
+    return {
+      total_item_banks: summary.length,
+      ready_for_cat: totalReady,
+      not_ready: totalNotReady,
+      overall_percentage: Math.round((totalReady / summary.length) * 100),
+      item_banks: summary,
+    };
+  }
+
+  /**
+   * ตรวจสอบว่าข้อสอบมี IRT parameters ครบ
+   */
+  private isValidIRTItem(item: Item): boolean {
+    if (
+      item.irt_a_discrimination == null ||
+      item.irt_b_difficulty == null ||
+      item.irt_c_guessing == null
+    ) {
+      return false;
+    }
+
+    if (
+      !isFinite(item.irt_a_discrimination) ||
+      !isFinite(item.irt_b_difficulty) ||
+      !isFinite(item.irt_c_guessing)
+    ) {
+      return false;
+    }
+
+    if (item.irt_a_discrimination <= 0) {
+      return false;
+    }
+
+    if (item.irt_c_guessing < 0 || item.irt_c_guessing >= 1) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * หา IRT parameters ที่หายไป
+   */
+  private getMissingIRTParams(item: Item): string[] {
+    const missing: string[] = [];
+
+    if (
+      item.irt_a_discrimination == null ||
+      !isFinite(item.irt_a_discrimination) ||
+      item.irt_a_discrimination <= 0
+    ) {
+      missing.push('a (discrimination)');
+    }
+    if (item.irt_b_difficulty == null || !isFinite(item.irt_b_difficulty)) {
+      missing.push('b (difficulty)');
+    }
+    if (
+      item.irt_c_guessing == null ||
+      !isFinite(item.irt_c_guessing) ||
+      item.irt_c_guessing < 0 ||
+      item.irt_c_guessing >= 1
+    ) {
+      missing.push('c (guessing)');
+    }
+
+    return missing;
   }
 
 

@@ -5,10 +5,12 @@ import {
     CreateDateColumn,
     UpdateDateColumn,
     ManyToOne,
+    OneToMany,
     JoinColumn
 } from 'typeorm';
 
 import { ItemSituation } from './item_situations.entity';
+import { AnswerOption } from './answer_options.entity';
 
 @Entity('items')
 export class Item {
@@ -21,14 +23,14 @@ export class Item {
     @Column({ type: 'varchar', length: 255 })
     question_type: string;
 
-    @Column({ type: 'float4' })
-    irt_a_discrimination: number;
+    @Column({ type: 'float4', nullable: true })
+    irt_a_discrimination?: number;
 
-    @Column({ type: 'float4' })
-    irt_b_difficulty: number;
+    @Column({ type: 'float4', nullable: true })
+    irt_b_difficulty?: number;
 
-    @Column({ type: 'float4' })
-    irt_c_guessing: number;
+    @Column({ type: 'float4', nullable: true })
+    irt_c_guessing?: number;
 
     @Column({ type: 'varchar', length: 255 })
     explanation: string;
@@ -39,6 +41,9 @@ export class Item {
     @ManyToOne(() => ItemSituation)
     @JoinColumn({ name: 'situation_id' })
     situation: ItemSituation;
+
+    @OneToMany(() => AnswerOption, (option) => option.item)
+    answer_options: AnswerOption[];
 
     @Column({ type: 'varchar', length: 50, default: 'draft' })
     status: string;
