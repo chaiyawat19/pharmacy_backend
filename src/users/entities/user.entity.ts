@@ -27,31 +27,49 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
-  @Column({ type: 'varchar', length: 20 })
-  tel: string;
+  // ✅ Google ไม่มีเบอร์
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  tel: string | null;
 
-  @Column({ type: 'varchar', length: 255 })
+  // ✅ Google ไม่มี password
+  @Column({ type: 'varchar', length: 255, nullable: true })
   @Exclude()
-  password: string;
+  password: string | null;
 
-  @Column({ type: 'date' })
-  bod: Date;
+  // ✅ Google ไม่มีวันเกิด
+  @Column({ type: 'date', nullable: true })
+  bod: Date | null;
 
-  @Column({ type: 'integer' })
+  // ✅ Google ยังไม่เลือกมหาลัย
+  @Column({ type: 'integer', nullable: true })
   @Exclude()
-  university_id: number;
+  university_id: number | null;
 
-  @ManyToOne(() => University)
+  @ManyToOne(() => University, { nullable: true })
   @JoinColumn({ name: 'university_id' })
-  university: University;
+  university: University | null;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'integer', default: 1 })
   @Exclude()
   role_id: number;
 
   @ManyToOne(() => Role)
   @JoinColumn({ name: 'role_id' })
   role: Role;
+
+  // ✅ แยกว่า login แบบไหน
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: 'local',
+  })
+  provider: 'local' | 'google';
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  reset_password_token: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reset_password_expires: Date | null;
 
   @OneToMany(() => Note, (note) => note.user)
   notes: Note[];

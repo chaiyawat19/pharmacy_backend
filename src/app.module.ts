@@ -17,6 +17,10 @@ import { ItemsBankModule } from './items-bank/items-bank.module';
 import { TopicsModule } from './topics/topics.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CATModule } from './cat/cat.module';
+import { MailModule } from './mail/mail.module';
+import { SchedulesController } from './schedules/schedules.controller';
+import { SchedulesModule } from './schedules/schedules.module';
+import { NewsModule } from './news/news.module';
 
 @Module({
   imports: [
@@ -45,13 +49,16 @@ import { CATModule } from './cat/cat.module';
     TopicsModule,
     CategoriesModule,
     CATModule,
+    MailModule,
+    SchedulesModule,
+    NewsModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     {
       provide: APP_GUARD,
-      useClass: JwtAuthGuard, // ใช้ guard ใหม่
+      useClass: JwtAuthGuard,
     },
     {
       provide: APP_GUARD,
@@ -59,4 +66,4 @@ import { CATModule } from './cat/cat.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}

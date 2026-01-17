@@ -6,6 +6,9 @@ import { Repository } from 'typeorm';
 import { Chat_message } from './entities/chat_message.entity';
 import { firstValueFrom } from 'rxjs';
 
+interface N8NResponse {
+    reply: string;
+}
 
 @Injectable()
 export class ChatService {
@@ -23,9 +26,9 @@ export class ChatService {
         if (!session_id || session_id.toString() === 'null' || Number.isNaN(Number(session_id))) {
             const newSession = await this.sessionRepo.save({
                 user_id: user_id,
-                title: message.slice(0, 50) // ชื่อ session จากข้อความแรก
+                title: message.slice(0, 50)
             });
-            console.log(newSession);
+
             session_id = newSession.session_id;
         }
 
@@ -38,11 +41,7 @@ export class ChatService {
         const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
         let botReply = '';
 
-        const payload = {
-            user_id: user_id,
-            session_id: session_id,
-            message: message
-        };
+        const payload = { user_id, session_id, message };
 
         try {
             const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
@@ -55,6 +54,7 @@ export class ChatService {
                 botReply = this.cleanBotReply(data?.reply ?? '');
             }
 
+            botReply = response.data?.reply ?? '';
 
         } catch (error) {
             botReply = this.handleN8NError(error);
@@ -65,10 +65,8 @@ export class ChatService {
             message_text: botReply,
             sender_type: 'BOT'
         });
-        return {
-            user: savedUserMessage,
-            bot: savedBotMessage
-        }
+
+        return { user: savedUserMessage, bot: savedBotMessage };
     }
 
     // ดึงข้อมูลแชททั้งหมดภายใน session
@@ -98,31 +96,26 @@ export class ChatService {
     }
 
     async editMessage(message_id: number, message_text: string) {
-        // 1. ค้นหาข้อความเดิมเพื่อเอา session_id และ user_id
+
         const existingMessage = await this.messageRepo.findOne({
             where: { message_id },
-            relations: ['chat_session'] // Join ไปตาราง session เพื่อเอา user_id
+            relations: ['chat_session']
         });
 
         if (!existingMessage) {
             throw new HttpException('Message not found', HttpStatus.NOT_FOUND);
         }
 
-        // 2. อัปเดตข้อความของผู้ใช้ (Edit)
         existingMessage.message_text = message_text;
         const updatedUserMessage = await this.messageRepo.save(existingMessage);
 
-        // 3. เตรียมข้อมูลส่ง n8n (Manual Call เพื่อไม่ให้ save ข้อความ User ซ้ำ)
         const session_id = existingMessage.chat_session_id;
         const user_id = existingMessage.chat_session.user_id;
+
         const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
         let botReply = '';
 
-        const payload = {
-            user_id: user_id,
-            session_id: session_id,
-            message: message_text
-        };
+        const payload = { user_id, session_id, message: message_text };
 
         try {
             const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
@@ -138,17 +131,13 @@ export class ChatService {
             botReply = this.handleN8NError(error);
         }
 
-        // 4. บันทึกเฉพาะข้อความจาก Bot ใหม่
         const savedBotMessage = await this.messageRepo.save({
             chat_session_id: session_id,
             message_text: botReply,
             sender_type: 'BOT'
         });
 
-        return {
-            user: updatedUserMessage,
-            bot: savedBotMessage
-        };
+        return { user: updatedUserMessage, bot: savedBotMessage };
     }
 
     private cleanBotReply(reply: string): string {
@@ -197,4 +186,3 @@ export class ChatService {
         return `AI แจ้งข้อผิดพลาด: ${msg}${desc}`;
     }
 }
-

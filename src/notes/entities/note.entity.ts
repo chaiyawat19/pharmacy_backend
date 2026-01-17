@@ -5,6 +5,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  CreateDateColumn,
 } from 'typeorm';
 import { User } from 'src/users/entities/user.entity';
 import { NoteTag } from './note-tag.entity';
@@ -28,7 +29,12 @@ export class Note {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @OneToMany(() => NoteTag, (noteTag) => noteTag.note)
+  @CreateDateColumn({ type: 'timestamp' })
+  created_at: Date;
+
+  @OneToMany(() => NoteTag, (noteTag) => noteTag.note, {
+    cascade: true,
+  })
   tags: NoteTag[];
 
   @OneToMany(() => NoteFile, (file) => file.note)
