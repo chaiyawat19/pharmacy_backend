@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { CATExamService } from './cat-exam.service';
 import { StartCATExamDto, SubmitCATAnswerDto } from './dto/cat-exam.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 
 @Controller('cat')
 @UseGuards(JwtAuthGuard)
@@ -21,7 +21,7 @@ export class CATController {
      */
     @Post('start')
     async startExam(@Request() req, @Body() startExamDto: StartCATExamDto) {
-        const userId = req.user.user_id;
+        const userId = req.user.userId;
         return this.catExamService.startCATExam(userId, startExamDto);
     }
 
@@ -30,7 +30,7 @@ export class CATController {
      */
     @Get('session/:session_id/next-item')
     async getNextItem(@Request() req, @Param('session_id') sessionId: string) {
-        const userId = req.user.user_id;
+        const userId = req.user.userId;
         return this.catExamService.getNextItem(userId, +sessionId);
     }
 
@@ -42,7 +42,7 @@ export class CATController {
         @Request() req,
         @Body() submitAnswerDto: SubmitCATAnswerDto,
     ) {
-        const userId = req.user.user_id;
+        const userId = req.user.userId;
         return this.catExamService.submitAnswer(userId, submitAnswerDto);
     }
 
@@ -51,7 +51,7 @@ export class CATController {
      */
     @Get('session/:session_id/result')
     async getExamResult(@Request() req, @Param('session_id') sessionId: string) {
-        const userId = req.user.user_id;
+        const userId = req.user.userId;
         return this.catExamService.getExamResult(userId, +sessionId);
     }
 
@@ -60,7 +60,7 @@ export class CATController {
      */
     @Get('history')
     async getExamHistory(@Request() req) {
-        const userId = req.user.user_id;
+        const userId = req.user.userId;
         return this.catExamService.getUserCATHistory(userId);
     }
 
@@ -69,7 +69,7 @@ export class CATController {
      */
     @Get('session/:session_id')
     async getSession(@Request() req, @Param('session_id') sessionId: string) {
-        const userId = req.user.user_id;
+        const userId = req.user.userId;
         return this.catExamService.getCATSession(userId, +sessionId);
     }
 

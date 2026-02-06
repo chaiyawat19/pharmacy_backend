@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Param, Req, UseGuards, Query } from '@nest
 import { ItemsBankService } from './items-bank.service';
 import { StartExamDto, SubmitExamDto } from './dto/exam.dto';
 import { ExamHistoryFilterDto } from './dto/exam-history-filter.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 
 /**
  * Controller for exam-related endpoints
@@ -19,7 +19,7 @@ export class ExamController {
      */
     @Post('exam/start')
     startExam(@Req() req, @Body() startExamDto: StartExamDto) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.startExam(userId, startExamDto);
     }
 
@@ -29,7 +29,7 @@ export class ExamController {
      */
     @Post('exam/:sessionId/submit')
     submitExam(@Req() req, @Param('sessionId') sessionId: string, @Body() submitExamDto: SubmitExamDto) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.submitExam(userId, +sessionId, submitExamDto);
     }
 
@@ -39,13 +39,13 @@ export class ExamController {
      */
     @Get('exam/:sessionId/result')
     getExamResult(@Req() req, @Param('sessionId') sessionId: string) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.getExamResult(userId, +sessionId);
     }
 
     @Get('exam-result/:sessionId')
     getExamResultAlias(@Req() req, @Param('sessionId') sessionId: string) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.getExamResult(userId, +sessionId);
     }
 
@@ -55,7 +55,7 @@ export class ExamController {
      */
     @Get('exam/history')
     getUserExamHistory(@Req() req, @Query() filters: ExamHistoryFilterDto) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.getUserExamHistory(userId, filters);
     }
 
@@ -65,7 +65,7 @@ export class ExamController {
      */
     @Get('exam/categories')
     getUserExamCategories(@Req() req) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.getUserExamCategories(userId);
     }
 
@@ -76,7 +76,7 @@ export class ExamController {
      */
     @Get('mastery')
     getUserAllItemMastery(@Req() req) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.getUserItemMastery(userId);
     }
 
@@ -86,7 +86,7 @@ export class ExamController {
      */
     @Get('mastery/:itemId')
     getUserSingleItemMastery(@Req() req, @Param('itemId') itemId: string) {
-        const userId = req.user.id;
+        const userId = req.user.userId;
         return this.itemsBankService.getUserItemMastery(userId, +itemId);
     }
 }

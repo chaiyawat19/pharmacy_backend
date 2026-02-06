@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
-import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/role.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -32,16 +32,16 @@ export class UsersController {
   findAll() {
     return this.usersService.findAll();
   }
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(JwtAuthGuard)
   @Get('profile')
   getProfile(@Request() req) {
     const user = this.usersService.findByEmail(req.user.email);
     return user;
   }
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(JwtAuthGuard)
   @Patch('profile')
   async updateProfile(@Request() req, @Body() updateData: UpdateUserDto) {
-    const userId = req.user.id; // <-- เปลี่ยนจาก user_id เป็น id
+    const userId = req.user.userId;
 
     const updatedUser = await this.usersService.updateProfile(
       userId,

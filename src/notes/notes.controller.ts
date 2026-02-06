@@ -21,7 +21,7 @@ import { JwtAuthGuard } from 'src/common/guard/jwt-auth.guard';
 
 @Controller('notes')
 export class NotesController {
-  constructor(private readonly notesService: NotesService) {}
+  constructor(private readonly notesService: NotesService) { }
 
   private parseTags(tags: any): string[] {
     if (!tags || tags === 'undefined' || tags === 'null') return [];
@@ -87,7 +87,7 @@ export class NotesController {
     }
 
     const tagIds = this.parseTags(dto.tagIds);
-    const userId = req.user.id || req.user.user_id || req.user.userId;
+    const userId = req.user.userId;
     return this.notesService.create({ ...dto, tagIds }, userId, files);
   }
 
@@ -127,7 +127,7 @@ export class NotesController {
       }
     }
 
-    const userId = req.user.id || req.user.user_id || req.user.userId;
+    const userId = req.user.userId;
     return this.notesService.update(
       +id,
       { ...dto, tagIds: tagIds as any, deletedFiles } as any,

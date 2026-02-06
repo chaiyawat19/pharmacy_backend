@@ -13,7 +13,7 @@ import {
 import { SchedulesService } from './schedules.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
-import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/common/guard/jwt-auth.guard';
 
 @Controller('schedules')
 export class SchedulesController {
@@ -22,7 +22,6 @@ export class SchedulesController {
   @UseGuards(JwtAuthGuard)
   @Post()
   create(@Body() dto: CreateScheduleDto, @Req() req) {
-    console.log('User from Token:', req.user);
     const userId = req.user.userId;
     if (!userId) {
       throw new UnauthorizedException('ไม่พบ userId ใน Token');

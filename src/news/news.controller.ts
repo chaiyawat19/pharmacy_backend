@@ -6,18 +6,26 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
+  Req,
 } from '@nestjs/common';
 import { NewsService } from './news.service';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { UpdateNewsDto } from './dto/update-news.dto';
+import { JwtAuthGuard } from 'src/common/guard/jwt-auth.guard';
 
 @Controller('news')
 export class NewsController {
-  constructor(private readonly newsService: NewsService) {}
+  constructor(private readonly newsService: NewsService) { }
 
   @Post()
-  create(@Body() createNewsDto: CreateNewsDto) {
-    return this.newsService.create(createNewsDto);
+  @UseGuards(JwtAuthGuard)
+  create(@Body() createNewsDto: CreateNewsDto, @Req() req) {
+    const userId = req.user.userId;
+    return this.newsService.create({
+      ...createNewsDto,
+      author_id: userId
+    });
   }
 
   @Get()
