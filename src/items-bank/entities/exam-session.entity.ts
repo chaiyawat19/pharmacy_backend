@@ -22,9 +22,6 @@ export class ExamSession {
     @Column({ name: 'item_bank_id', type: 'int' })
     itemBankId: number;
 
-    @Column({ type: 'varchar', length: 50, default: 'IN_PROGRESS' })
-    status: string;
-
     @CreateDateColumn({ type: 'timestamptz' })
     start_time: Date;
 

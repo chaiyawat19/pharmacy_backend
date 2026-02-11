@@ -26,10 +26,6 @@ export class QuestionDto {
     @IsString()
     question_text: string;
 
-    @IsNotEmpty()
-    @IsString()
-    question_type: string;
-
     @IsOptional()
     @IsString()
     explanation: string;

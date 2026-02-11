@@ -66,4 +66,4 @@ import { NewsModule } from './news/news.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }

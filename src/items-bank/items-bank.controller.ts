@@ -152,4 +152,12 @@ export class ItemsBankController {
   getCATReadinessSummary() {
     return this.itemsBankService.getCATReadinessSummary();
   }
+
+  /**
+   * ดึงข้อมูล Dashboard ของ Item Bank
+   */
+  @Get(':id/dashboard')
+  getDashboardStats(@Param('id') id: string) {
+    return this.itemsBankService.getDashboardStats(+id);
+  }
 }

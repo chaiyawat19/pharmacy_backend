@@ -20,9 +20,6 @@ export class Item {
     @Column({ type: 'varchar', length: 255 })
     question_text: string;
 
-    @Column({ type: 'varchar', length: 255 })
-    question_type: string;
-
     @Column({ type: 'float4', nullable: true })
     irt_a_discrimination?: number;
 

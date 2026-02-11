@@ -233,6 +233,11 @@ export class ItemsBankService {
 
       const savedItems: Item[] = [];
 
+      // นับจำนวนคำถามที่มีอยู่แล้วใน item bank เพื่อกำหนด display_order ที่ถูกต้อง
+      const existingItemsCount = await queryRunner.manager.count(ItemBankItem, {
+        where: { item_bank_id }
+      });
+
       // 2. วนลูปสร้างแต่ละคำถาม
       for (let i = 0; i < questions.length; i++) {
         const questionData = questions[i];
@@ -248,13 +253,19 @@ export class ItemsBankService {
         });
         const savedItem = await queryRunner.manager.save(item);
 
-        // 2.2 สร้างความสัมพันธ์ใน item_bank_items
-        const itemBankItem = queryRunner.manager.create(ItemBankItem, {
-          item_bank_id,
-          item_id: savedItem.item_id,
-          display_order: i + 1, // เรียงตามลำดับที่ส่งมา
+        // 2.2 สร้างความสัมพันธ์ใน item_bank_items (ตรวจสอบว่ามีอยู่แล้วหรือไม่)
+        const existingRelation = await queryRunner.manager.findOne(ItemBankItem, {
+          where: { item_bank_id, item_id: savedItem.item_id }
         });
-        await queryRunner.manager.save(itemBankItem);
+
+        if (!existingRelation) {
+          const itemBankItem = queryRunner.manager.create(ItemBankItem, {
+            item_bank_id,
+            item_id: savedItem.item_id,
+            display_order: existingItemsCount + i + 1, // เรียงต่อจากที่มีอยู่
+          });
+          await queryRunner.manager.save(itemBankItem);
+        }
 
         // 2.3 ถ้ามี sub_topic_id ให้สร้างความสัมพันธ์ใน item_sub_topics
         if (sub_topic_id) {
@@ -337,13 +348,20 @@ export class ItemsBankService {
         });
         const savedItem = await queryRunner.manager.save(item);
 
-        // สร้างความสัมพันธ์ใน item_bank_items
-        const itemBankItem = queryRunner.manager.create(ItemBankItem, {
-          item_bank_id,
-          item_id: savedItem.item_id,
-          display_order: existingItemsCount + i + 1, // เพิ่มต่อจากที่มีอยู่
+
+        // สร้างความสัมพันธ์ใน item_bank_items (ตรวจสอบว่ามีอยู่แล้วหรือไม่)
+        const existingRelation = await queryRunner.manager.findOne(ItemBankItem, {
+          where: { item_bank_id, item_id: savedItem.item_id }
         });
-        await queryRunner.manager.save(itemBankItem);
+
+        if (!existingRelation) {
+          const itemBankItem = queryRunner.manager.create(ItemBankItem, {
+            item_bank_id,
+            item_id: savedItem.item_id,
+            display_order: existingItemsCount + i + 1, // เพิ่มต่อจากที่มีอยู่
+          });
+          await queryRunner.manager.save(itemBankItem);
+        }
 
         // ถ้ามี sub_topic_id ให้สร้างความสัมพันธ์ใน item_sub_topics
         if (sub_topic_id) {
@@ -454,7 +472,6 @@ export class ItemsBankService {
         return {
           item_id: item.item_id,
           question_text: item.question_text,
-          question_type: item.question_type,
           explanation: item.explanation,
           status: item.status,
           display_order: itemBankItem.display_order,
@@ -466,7 +483,8 @@ export class ItemsBankService {
           situation: item.situation ? {
             situation_id: item.situation.situation_id,
             situation_text: item.situation.situation_text,
-            situation_image_url: item.situation.situation_image_url
+            situation_image_url: item.situation.situation_image_url,
+            display_order: item.situation.display_order
           } : null,
           answer_options: answerOptions.map(option => ({
             option_id: option.option_id,
@@ -674,17 +692,41 @@ export class ItemsBankService {
 
     // Update answer options ถ้ามี
     if (answer_options && Array.isArray(answer_options)) {
-      // ลบ answer options เก่าทั้งหมด
-      await this.answerOptionRepo.delete({ item_id });
+      // ดึงตัวเลือกคำตอบที่มีอยู่เดิม
+      const existingOptions = await this.answerOptionRepo.find({ where: { item_id } });
+      const existingIds = existingOptions.map(opt => opt.option_id);
 
-      // เพิ่ม answer options ใหม่
-      for (let i = 0; i < answer_options.length; i++) {
-        const answerOption = this.answerOptionRepo.create({
-          item_id,
-          option_text: answer_options[i].option_text,
-          is_correct: answer_options[i].is_correct
-        });
-        await this.answerOptionRepo.save(answerOption);
+      // รวบรวม ID ที่ส่งมา (ถ้ามี)
+      const incomingIds = answer_options
+        .map((opt: any) => opt.option_id)
+        .filter((id: any) => id);
+
+      // ลบตัวเลือกที่ไม่อยู่ในรายการที่ส่งมา
+      const idsToDelete = existingIds.filter(id => !incomingIds.includes(id));
+      if (idsToDelete.length > 0) {
+        await this.answerOptionRepo.delete(idsToDelete);
+      }
+
+      // อัพเดทหรือสร้างใหม่
+      for (const option of answer_options) {
+        if (option.option_id && existingIds.includes(option.option_id)) {
+          // มี ID เดิมอยู่แล้ว -> Update
+          await this.answerOptionRepo.update(
+            { option_id: option.option_id },
+            {
+              option_text: option.option_text,
+              is_correct: option.is_correct
+            }
+          );
+        } else {
+          // ไม่มี ID หรือเป็น ID ใหม่ -> Create
+          const newOption = this.answerOptionRepo.create({
+            item_id,
+            option_text: option.option_text,
+            is_correct: option.is_correct
+          });
+          await this.answerOptionRepo.save(newOption);
+        }
       }
     }
 
@@ -747,8 +789,7 @@ export class ItemsBankService {
 
     const session = this.examSessionRepo.create({
       userId: userId,
-      itemBankId: item_bank_id,
-      status: 'IN_PROGRESS'
+      itemBankId: item_bank_id
     });
 
     const savedSession = await this.examSessionRepo.save(session);
@@ -822,7 +863,6 @@ export class ItemsBankService {
     await this.examSessionRepo.update(
       { session_id: sessionId },
       {
-        status: 'COMPLETED',
         end_time: new Date(),
         final_score: finalScore
       }
@@ -995,7 +1035,7 @@ export class ItemsBankService {
     return {
       session_id: sessionId,
       item_bank_name: session.item_bank.bank_name,
-      status: session.status,
+      status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS',
       start_time: session.start_time,
       end_time: session.end_time,
       total_questions: totalQuestions,
@@ -1015,7 +1055,8 @@ export class ItemsBankService {
     let query = this.examSessionRepo
       .createQueryBuilder('session')
       .leftJoinAndSelect('session.item_bank', 'item_bank')
-      .where('session.userId = :userId', { userId });
+      .where('session.userId = :userId', { userId })
+      .andWhere('session.end_time IS NOT NULL'); // Only show completed exams
 
     // ถ้ามีการกรองตาม item_bank_id
     if (filters?.item_bank_id) {
@@ -1024,12 +1065,7 @@ export class ItemsBankService {
       });
     }
 
-    // ถ้ามีการกรองตาม status
-    if (filters?.status && filters.status !== 'ALL') {
-      query = query.andWhere('session.status = :status', {
-        status: filters.status
-      });
-    }
+    // Status filter removed as we only show completed exams now
 
     // ถ้ามีการกรองตาม category
     if (filters?.category_ids && filters.category_ids.length > 0) {
@@ -1060,7 +1096,7 @@ export class ItemsBankService {
           session_id: Number(session.session_id),
           item_bank_id: session.itemBankId,
           item_bank_name: session.item_bank.bank_name,
-          status: session.status,
+          status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS',
           start_time: session.start_time,
           end_time: session.end_time,
           final_score: session.final_score,
@@ -1153,7 +1189,6 @@ export class ItemsBankService {
     return itemsWithIRT.map((bbi) => ({
       item_id: bbi.item.item_id,
       question_text: bbi.item.question_text,
-      question_type: bbi.item.question_type,
       irt_a_discrimination: bbi.item.irt_a_discrimination,
       irt_b_difficulty: bbi.item.irt_b_difficulty,
       irt_c_guessing: bbi.item.irt_c_guessing,
@@ -1218,7 +1253,6 @@ export class ItemsBankService {
       items: itemsWithIRT.map((bbi) => ({
         item_id: bbi.item.item_id,
         question_text: bbi.item.question_text,
-        question_type: bbi.item.question_type,
         irt_a_discrimination: bbi.item.irt_a_discrimination,
         irt_b_difficulty: bbi.item.irt_b_difficulty,
         irt_c_guessing: bbi.item.irt_c_guessing,
@@ -1437,4 +1471,112 @@ export class ItemsBankService {
   }
 
 
+
+  /**
+   * ดึงข้อมูลสถิติภาพรวมของ Item Bank สำหรับ Dashboard
+   */
+  async getDashboardStats(itemBankId: number) {
+    // 1. ตรวจสอบว่ามี Item Bank อยู่จริง
+    const bank = await this.bankRepo.findOne({ where: { item_bank_id: itemBankId } });
+    if (!bank) {
+      throw new NotFoundException(`Item bank with ID ${itemBankId} not found`);
+    }
+
+    // 2. ดึงจำนวนข้อสอบทั้งหมด
+    const totalItems = await this.itemBankItemRepo.count({
+      where: { item_bank_id: itemBankId }
+    });
+
+    // 3. ดึงจำนวนครั้งที่มีผู้เข้าสอบ (Sessions)
+    const totalAttempts = await this.examSessionRepo.count({
+      where: { itemBankId: itemBankId, end_time: In([(null as any), undefined]) ? undefined : undefined } // Count all attempts or completed only? Let's count all valid sessions first. actually let's filter completed items for stats
+    });
+
+    // Count only completed sessions for score stats
+    const completedSessions = await this.examSessionRepo.find({
+      where: { itemBankId: itemBankId, end_time: In([(null as any)]) ? undefined : undefined }, // This query needs to check NOT NULL for end_time. TypeORM shorthand for NOT NULL is simply not providing null, but let's be explicit with query builder if needed.
+      // Simplify: find all and filter in memory or use query builder. Query builder is better.
+    });
+
+    // Find completed sessions using query builder for better performance and correctness
+    const completedSessionsBuilder = this.examSessionRepo.createQueryBuilder('session')
+      .where('session.itemBankId = :itemBankId', { itemBankId })
+      .andWhere('session.end_time IS NOT NULL');
+
+    const completedCount = await completedSessionsBuilder.getCount();
+    const completedSessionsData = await completedSessionsBuilder.getMany();
+
+    // 4. คำนวณคะแนนเฉลี่ย
+    let averageScore = 0;
+    let maxScore = 0;
+    let minScore = 0;
+    let passCount = 0; // สมมติเกณฑ์ผ่าน 60%
+
+    // Score distribution (range of 10)
+    const scoreDistribution = Array(10).fill(0).map((_, i) => ({
+      range: `${i * 10}-${(i + 1) * 10}%`,
+      count: 0
+    }));
+
+    if (completedCount > 0) {
+      const scores = completedSessionsData.map(s => s.final_score);
+      const sumScore = scores.reduce((a, b) => a + b, 0);
+      averageScore = sumScore / completedCount;
+      maxScore = Math.max(...scores);
+      minScore = Math.min(...scores);
+
+      const passThreshold = 60; // 60%
+      passCount = scores.filter(s => s >= passThreshold).length;
+
+      // Calculate distribution
+      scores.forEach(score => {
+        const index = Math.min(Math.floor(score / 10), 9);
+        scoreDistribution[index].count++;
+      });
+    }
+
+    const passRate = completedCount > 0 ? (passCount / completedCount) * 100 : 0;
+
+    // 5. Recent Activity (Latest 5 sessions)
+    const recentActivity = await this.examSessionRepo.find({
+      where: { itemBankId: itemBankId },
+      order: { start_time: 'DESC' },
+      take: 5,
+      // relations: ['user'] // หากมี user relation ให้ใส่ด้วย
+    });
+
+    // เนื่องจากยังไม่มี User entity ที่ชัดเจนใน Service นี้ (อาจจะแยก Module)
+    // เราจะส่งไปแค่ user_id ก่อน หรือถ้ามี User Service ก็ควร inject มาใช้
+
+    return {
+      item_bank: {
+        id: bank.item_bank_id,
+        name: bank.bank_name,
+        created_at: bank.created_at,
+        updated_at: bank.updated_at,
+        duration: bank.duration,
+        is_active: bank.is_active
+      },
+      stats: {
+        total_items: totalItems,
+        total_attempts: totalAttempts, // All sessions created
+        completed_attempts: completedCount, // Only finished exams
+        average_score: Math.round(averageScore * 100) / 100,
+        max_score: Math.round(maxScore * 100) / 100,
+        min_score: Math.round(minScore * 100) / 100,
+        pass_rate: Math.round(passRate * 100) / 100,
+      },
+      charts: {
+        score_distribution: scoreDistribution
+      },
+      recent_activity: recentActivity.map(session => ({
+        session_id: session.session_id,
+        user_id: session.userId,
+        start_time: session.start_time,
+        end_time: session.end_time,
+        score: session.final_score,
+        status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS'
+      }))
+    };
+  }
 }

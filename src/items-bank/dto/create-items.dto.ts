@@ -24,10 +24,6 @@ export class CreateItemsDto {
 
     @IsNotEmpty()
     @IsString()
-    question_type: string;
-
-    @IsNotEmpty()
-    @IsString()
     explanation: string;
 
     @IsOptional()
