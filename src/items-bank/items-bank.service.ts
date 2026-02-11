@@ -619,32 +619,53 @@ export class ItemsBankService {
   }
 
   async deleteSituation(situation_id: number) {
-    // หาคำถามทั้งหมดในสถานการณ์นี้
-    const items = await this.itemRepo.find({ where: { situation_id } });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    // ลบคำถามแต่ละข้อพร้อมข้อมูลที่เกี่ยวข้อง
-    for (const item of items) {
-      // ลบ answer options
-      await this.answerOptionRepo.delete({ item_id: item.item_id });
+    try {
+      // หาคำถามทั้งหมดในสถานการณ์นี้
+      const items = await this.itemRepo.find({ where: { situation_id } });
 
-      // ลบ item_sub_topics
-      await this.itemSubTopicRepo.delete({ item_id: item.item_id });
+      // ลบคำถามแต่ละข้อพร้อมข้อมูลที่เกี่ยวข้อง
+      for (const item of items) {
+        // ลบ answer options
+        await queryRunner.manager.delete(AnswerOption, { item_id: item.item_id });
 
-      // ลบ item_bank_items
-      await this.itemBankItemRepo.delete({ item_id: item.item_id });
+        // ลบ item_sub_topics
+        await queryRunner.manager.delete(ItemSubTopic, { item_id: item.item_id });
 
-      // ลบ item
-      await this.itemRepo.delete({ item_id: item.item_id });
+        // ลบ item_bank_items
+        await queryRunner.manager.delete(ItemBankItem, { item_id: item.item_id });
+
+        // ลบ user_item_mastery (ประวัติการทำข้อสอบของผู้ใช้ในแต่ละข้อ)
+        await queryRunner.manager.delete(UserItemMastery, { item_id: item.item_id });
+
+        // ลบ exam_responses (คำตอบในการสอบ)
+        await queryRunner.manager.delete(ExamResponse, { item_id: item.item_id });
+
+        // ลบ item
+        await queryRunner.manager.delete(Item, { item_id: item.item_id });
+      }
+
+      // ลบสถานการณ์
+      const result = await queryRunner.manager.delete(ItemSituation, { situation_id });
+
+      await queryRunner.commitTransaction();
+
+      return {
+        message: (result.affected ?? 0) > 0 ? 'ลบสถานการณ์สำเร็จ' : 'ไม่พบสถานการณ์ที่ต้องการลบ',
+        success: (result.affected ?? 0) > 0,
+        deleted_items: items.length
+      };
+
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      console.error('Error deleting situation:', err);
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
-
-    // ลบสถานการณ์
-    const result = await this.situationRepo.delete({ situation_id });
-
-    return {
-      message: (result.affected ?? 0) > 0 ? 'ลบสถานการณ์สำเร็จ' : 'ไม่พบสถานการณ์ที่ต้องการลบ',
-      success: (result.affected ?? 0) > 0,
-      deleted_items: items.length
-    };
   }
 
   async updateSituation(situation_id: number, updateData: Partial<CreateSituationDto>) {
@@ -1525,7 +1546,7 @@ export class ItemsBankService {
       maxScore = Math.max(...scores);
       minScore = Math.min(...scores);
 
-      const passThreshold = 60; // 60%
+      const passThreshold = 50; // 50%
       passCount = scores.filter(s => s >= passThreshold).length;
 
       // Calculate distribution
@@ -1537,25 +1558,44 @@ export class ItemsBankService {
 
     const passRate = completedCount > 0 ? (passCount / completedCount) * 100 : 0;
 
-    // 5. Recent Activity (Latest 5 sessions)
-    const recentActivity = await this.examSessionRepo.find({
-      where: { itemBankId: itemBankId },
-      order: { start_time: 'DESC' },
-      take: 5,
-      // relations: ['user'] // หากมี user relation ให้ใส่ด้วย
+    // 5. ดึง categories
+    const categoryRelations = await this.itemBankCategoryRepo.find({
+      where: { item_bank_id: itemBankId },
+      relations: ['category']
     });
 
-    // เนื่องจากยังไม่มี User entity ที่ชัดเจนใน Service นี้ (อาจจะแยก Module)
-    // เราจะส่งไปแค่ user_id ก่อน หรือถ้ามี User Service ก็ควร inject มาใช้
+    const categories = categoryRelations.map(rel => ({
+      category_id: rel.category.category_id,
+      category_name: rel.category.category_name
+    }));
+
+    // 6. Recent Activity (Latest 10 sessions)
+    const recentActivityRaw = await this.examSessionRepo.find({
+      where: { itemBankId: itemBankId },
+      order: { start_time: 'DESC' },
+      take: 10,
+      relations: ['user']
+    });
+
+    const recentActivity = recentActivityRaw.map(session => ({
+      session_id: session.session_id,
+      user_id: session.userId,
+      user_name: session.user ? `${session.user.first_name} ${session.user.last_name}` : `User #${session.userId}`,
+      start_time: session.start_time,
+      end_time: session.end_time,
+      score: session.final_score,
+      status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS'
+    }));
 
     return {
       item_bank: {
         id: bank.item_bank_id,
         name: bank.bank_name,
-        created_at: bank.created_at,
+        created_at: bank.created_at, // ส่ง created_at กลับไปด้วย
         updated_at: bank.updated_at,
         duration: bank.duration,
-        is_active: bank.is_active
+        is_active: bank.is_active,
+        categories: categories.map(c => ({ category_id: c.category_id, category_name: c.category_name })) // Map ให้ตรง format
       },
       stats: {
         total_items: totalItems,
@@ -1569,14 +1609,7 @@ export class ItemsBankService {
       charts: {
         score_distribution: scoreDistribution
       },
-      recent_activity: recentActivity.map(session => ({
-        session_id: session.session_id,
-        user_id: session.userId,
-        start_time: session.start_time,
-        end_time: session.end_time,
-        score: session.final_score,
-        status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS'
-      }))
+      recent_activity: recentActivity
     };
   }
 }
