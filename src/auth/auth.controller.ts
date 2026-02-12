@@ -21,7 +21,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
-  ) { }
+  ) {}
 
   @Public()
   @UseGuards(LocalAuthGuard)
@@ -61,19 +61,16 @@ export class AuthController {
   @Public()
   @Get('google')
   @UseGuards(AuthGuard('google'))
-  googleLogin() { }
+  googleLogin() {}
 
   @Public()
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
   async googleCallback(@Req() req, @Res({ passthrough: true }) res) {
-    console.log('GOOGLE CALLBACK USER:', req.user);
-
     if (!req.user) {
       throw new Error('Google authentication failed');
     }
     const accessToken = await this.authService.socialLogin(req.user);
-
     return res.redirect('http://localhost:3000/user');
   }
 }

@@ -51,7 +51,6 @@ export class UsersController {
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
   }
-
 }
 
 @Controller('admin')

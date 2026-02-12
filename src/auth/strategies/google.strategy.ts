@@ -13,19 +13,18 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       scope: ['email', 'profile'],
     });
   }
-
   async validate(
     accessToken: string,
     refreshToken: string,
     profile: Profile,
   ) {
-    console.log('===== GOOGLE VALIDATE HIT =====');
-    console.log('accessToken:', accessToken);
-    console.log('refreshToken:', refreshToken);
-    console.log('profile:', profile);
-    console.log('emails:', profile?.emails);
-    console.log('name:', profile?.name);
-    console.log('================================');
+    // console.log('===== GOOGLE VALIDATE HIT =====');
+    // console.log('accessToken:', accessToken);
+    // console.log('refreshToken:', refreshToken);
+    // console.log('profile:', profile);
+    // console.log('emails:', profile?.emails);
+    // console.log('name:', profile?.name);
+    // console.log('================================');
 
     if (!profile?.emails?.length) {
       throw new Error('Google account has no email');

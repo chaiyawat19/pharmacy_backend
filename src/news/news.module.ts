@@ -10,6 +10,6 @@ import { NewsTag } from './entities/news_article_tags.entity';
   imports: [TypeOrmModule.forFeature([NewsArticle, NewsCategory, NewsTag])],
   controllers: [NewsController],
   providers: [NewsService],
-  exports: [NewsService], // ใส่ไว้เผื่อโมดูลอื่นต้องการเรียกใช้
+  exports: [NewsService],
 })
 export class NewsModule {}

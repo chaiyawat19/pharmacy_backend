@@ -62,11 +62,10 @@ export class UsersService {
     const user = this.userRepository.create({
       ...createUserDto,
       password: hashedPassword,
-      role_id: 1, // Default role_id for new users
+      role_id: 1,
     });
     return await this.userRepository.save(user);
   }
-
   async validatePassword(
     password: string,
     hashedPassword: string | null,
@@ -74,7 +73,6 @@ export class UsersService {
     if (!hashedPassword) return false; // Google user
     return bcrypt.compare(password, hashedPassword);
   }
-
   async createSocialUser(data: {
     email: string;
     first_name: string;
@@ -120,7 +118,6 @@ export class UsersService {
           );
         }
       }
-
       updateData.email = newEmail;
     }
     delete updateData.password;
