@@ -7,6 +7,9 @@ import { NewsTag } from './entities/news_article_tags.entity';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { UpdateNewsDto } from './dto/update-news.dto';
 
+import { NotificationsService } from '../notifications/notifications.service';
+import { UsersService } from '../users/users.service';
+
 @Injectable()
 export class NewsService {
   constructor(
@@ -16,6 +19,8 @@ export class NewsService {
     private readonly categoryRepository: Repository<NewsCategory>,
     @InjectRepository(NewsTag)
     private readonly tagRepository: Repository<NewsTag>,
+    private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService,
   ) { }
 
   // --- สร้างข่าวใหม่ ---
@@ -33,7 +38,25 @@ export class NewsService {
       });
     }
 
-    return await this.newsRepository.save(news);
+    const savedNews = await this.newsRepository.save(news);
+
+    // แจ้งเตือนผู้ใช้ทุกคนเมื่อมีข่าวใหม่
+    try {
+      const users = await this.usersService.findAll();
+      await Promise.all(users.map(user =>
+        this.notificationsService.create({
+          user_id: user.user_id,
+          title: 'มีประกาศข่าวใหม่ 📢',
+          message: savedNews.title,
+          notification_type_id: 1, // Let's use 1 for news/info
+          link_url: `/user/news/${savedNews.article_id}`
+        })
+      ));
+    } catch (error) {
+      console.error('Error sending news notifications:', error);
+    }
+
+    return savedNews;
   }
 
   async update(id: number, updateNewsDto: UpdateNewsDto) {
