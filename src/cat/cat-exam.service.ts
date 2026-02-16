@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { CATSession } from './entities/cat-session.entity';
 import { IRTService, IRTResponse } from './irt.service';
 import { CATService } from './cat.service';
@@ -9,6 +9,10 @@ import { ItemsBank } from '../items-bank/entities/items-bank.entity';
 import { ItemBankItem } from '../items-bank/entities/item_bank_items.entity';
 import { Item } from '../items-bank/entities/items.entity';
 import { AnswerOption } from '../items-bank/entities/answer_options.entity';
+import { ItemSubTopic } from '../items-bank/entities/item_sub_topics.entity';
+import { Topic } from '../topics/entities/topic.entity';
+
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class CATExamService {
@@ -23,45 +27,53 @@ export class CATExamService {
         private readonly itemRepo: Repository<Item>,
         @InjectRepository(AnswerOption)
         private readonly answerOptionRepo: Repository<AnswerOption>,
+        @InjectRepository(ItemSubTopic)
+        private readonly itemSubTopicRepo: Repository<ItemSubTopic>,
+        @InjectRepository(Topic)
+        private readonly topicRepo: Repository<Topic>,
         private readonly irtService: IRTService,
         private readonly catService: CATService,
+        private readonly notificationsService: NotificationsService,
     ) { }
 
     /**
      * เริ่มการสอบ CAT
      */
     async startCATExam(userId: number, startExamDto: StartCATExamDto) {
-        const { item_bank_id, min_items, max_items, target_se, cut_score, mode } =
+        const { item_bank_id, min_items, max_items, target_se, cut_score, mode, initial_theta, topic_proportions } =
             startExamDto;
 
-        // ตรวจสอบว่า item bank มีอยู่จริง
-        const itemBank = await this.itemsBankRepo.findOne({
-            where: { item_bank_id },
-        });
-        if (!itemBank) {
-            throw new NotFoundException(`ไม่พบคลังข้อสอบ ID ${item_bank_id}`);
-        }
+        if (item_bank_id) {
+            // ตรวจสอบว่า item bank มีอยู่จริง
+            const itemBank = await this.itemsBankRepo.findOne({
+                where: { item_bank_id },
+            });
+            if (!itemBank) {
+                throw new NotFoundException(`ไม่พบคลังข้อสอบ ID ${item_bank_id}`);
+            }
 
-        // ตรวจสอบว่า item bank พร้อมสำหรับ CAT (มีข้อสอบที่มี IRT parameters ครบ)
-        const minItemsRequired = min_items || 20;
-        await this.validateItemBankForCAT(item_bank_id, minItemsRequired);
+            // ตรวจสอบว่า item bank พร้อมสำหรับ CAT (มีข้อสอบที่มี IRT parameters ครบ)
+            const minItemsRequired = min_items || 20;
+            await this.validateItemBankForCAT(item_bank_id, minItemsRequired);
+        }
 
         // สร้าง CAT session ใหม่
         const session = this.catSessionRepo.create({
             user_id: userId,
             item_bank_id: item_bank_id,
-            current_theta: 0.0,
+            current_theta: initial_theta || 0.0,
             current_se: 999.0,
             num_items: 0,
             num_correct: 0,
             status: 'IN_PROGRESS',
             used_item_ids: [],
             responses: [],
-            min_items: minItemsRequired,
+            min_items: min_items || 20,
             max_items: max_items || 50,
             target_se: target_se || 0.35,
             cut_score: cut_score || 0.0,
             mode: mode || 'real',
+            topic_proportions: topic_proportions || null,
         });
 
         const savedSession = await this.catSessionRepo.save(session);
@@ -94,22 +106,118 @@ export class CATExamService {
      * เลือกข้อแรกสำหรับ session
      */
     private async selectFirstItemForSession(session: CATSession) {
-        const itemBank = await this.getItemBankItems(session.item_bank_id);
+        const itemBank = await this.getAvailableItemsWithTopics(session.item_bank_id);
+
+        if (session.topic_proportions) {
+            const targetTopicId = this.selectNextTopicId(session, [], itemBank);
+            if (targetTopicId) {
+                const filtered = itemBank.filter((i) => i.topic_id === targetTopicId);
+                if (filtered.length > 0) {
+                    const usedItemIds = new Set<number>(session.used_item_ids || []);
+                    const firstItem = this.catService.selectFirstItem(filtered, usedItemIds);
+                    if (firstItem) return this.enrichItemWithOptions(firstItem);
+                }
+            }
+        }
+
         const usedItemIds = new Set<number>(session.used_item_ids || []);
         const firstItem = this.catService.selectFirstItem(itemBank, usedItemIds);
 
         if (!firstItem) return null;
+        return this.enrichItemWithOptions(firstItem);
+    }
 
-        // โหลด answer options
+    private async enrichItemWithOptions(item: any) {
         const answerOptions = await this.answerOptionRepo.find({
-            where: { item_id: firstItem.item_id },
+            where: { item_id: item.item_id },
             order: { option_id: 'ASC' },
         });
 
         return {
-            ...firstItem,
+            ...item,
             answer_options: answerOptions,
         };
+    }
+
+    /**
+     * ดึงข้อสอบที่พร้อมใช้งาน พร้อมข้อมูล Topic
+     */
+    private async getAvailableItemsWithTopics(itemBankId?: number) {
+        const query = this.itemRepo
+            .createQueryBuilder('item')
+            .leftJoinAndSelect('item.item_sub_topics', 'ist')
+            .leftJoinAndSelect('ist.sub_topic', 'st')
+            .leftJoinAndSelect('item.situation', 'situation')
+            .where('item.irt_a_discrimination > 0')
+            .andWhere('item.irt_b_difficulty IS NOT NULL')
+            .andWhere('item.irt_c_guessing IS NOT NULL')
+            .andWhere("item.status = 'published'");
+
+        if (itemBankId) {
+            query
+                .innerJoin(
+                    ItemBankItem,
+                    'ibi',
+                    'ibi.item_id = item.item_id AND ibi.item_bank_id = :itemBankId',
+                    { itemBankId },
+                );
+        }
+
+        const items = await query.getMany();
+
+        return items.map((item) => {
+            const topicId = (item as any).item_sub_topics?.[0]?.sub_topic?.topic_id;
+            return {
+                ...item,
+                topic_id: topicId,
+            };
+        });
+    }
+
+    /**
+     * คำนวณว่าควรเลือกข้อสอบจากหัวข้อใดถัดไปเพื่อให้ได้สัดส่วนตามที่กำหนด
+     */
+    private selectNextTopicId(
+        session: CATSession,
+        currentResponses: any[],
+        itemsWithTopics: any[],
+    ): number | null {
+        if (!session.topic_proportions) return null;
+
+        const targetProportions = session.topic_proportions; // { "1": 50, "2": 50 }
+        const totalItems = currentResponses.length;
+
+        if (totalItems === 0) {
+            const sortedTopics = Object.entries(targetProportions).sort(
+                (a, b) => (b[1] as number) - (a[1] as number),
+            );
+            return parseInt(sortedTopics[0][0]);
+        }
+
+        const currentCounts: Record<number, number> = {};
+        for (const resp of currentResponses) {
+            const item = itemsWithTopics.find((i) => i.item_id === resp.item_id);
+            if (item && item.topic_id) {
+                currentCounts[item.topic_id] = (currentCounts[item.topic_id] || 0) + 1;
+            }
+        }
+
+        let bestTopicId: number | null = null;
+        let maxDeficit = -1000;
+
+        for (const [topicIdStr, weight] of Object.entries(targetProportions)) {
+            const topicId = parseInt(topicIdStr);
+            const targetCount = ((weight as number) / 100) * (totalItems + 1);
+            const currentCount = currentCounts[topicId] || 0;
+            const deficit = targetCount - currentCount;
+
+            if (deficit > maxDeficit) {
+                maxDeficit = deficit;
+                bestTopicId = topicId;
+            }
+        }
+
+        return bestTopicId;
     }
 
     /**
@@ -208,6 +316,7 @@ export class CATExamService {
         // ดึงข้อปัจจุบัน
         const currentItem = await this.itemRepo.findOne({
             where: { item_id: session.current_item_id },
+            relations: ['situation'],
         });
 
         if (!currentItem) {
@@ -281,25 +390,29 @@ export class CATExamService {
         session.num_items += 1;
         if (isCorrect) session.num_correct += 1;
 
-        // ประมาณค่า theta ใหม่ (ใช้เฉพาะ responses ที่มี IRT params ครบ)
+        // ประมาณค่า theta ใหม่ (FETCH IRT PARAMS FOR ALL PAST ITEMS CORRECTLY)
+        const itemIds = responses.map((r) => r.item_id);
+        const historyItems = await this.itemRepo.find({
+            where: { item_id: In(itemIds) },
+        });
+        const itemMap = new Map(historyItems.map((i) => [i.item_id, i]));
+
         const irtResponses: IRTResponse[] = responses
-            .filter((r) => {
-                const respItem = responses.find((resp) => resp.item_id === r.item_id);
-                return (
-                    respItem &&
-                    item.irt_a_discrimination != null &&
-                    item.irt_b_difficulty != null &&
-                    item.irt_c_guessing != null
-                );
+            .map((r) => {
+                const i = itemMap.get(r.item_id);
+                if (i && this.isValidIRTItem(i)) {
+                    return {
+                        item: {
+                            a: i.irt_a_discrimination!,
+                            b: i.irt_b_difficulty!,
+                            c: i.irt_c_guessing!,
+                        },
+                        isCorrect: r.is_correct,
+                    };
+                }
+                return null;
             })
-            .map((r) => ({
-                item: {
-                    a: item.irt_a_discrimination!,
-                    b: item.irt_b_difficulty!,
-                    c: item.irt_c_guessing!,
-                },
-                isCorrect: r.is_correct,
-            }));
+            .filter((r) => r !== null) as IRTResponse[];
 
         const estimation = this.irtService.estimateThetaEAP(irtResponses);
         session.current_theta = estimation.theta;
@@ -339,6 +452,19 @@ export class CATExamService {
 
             await this.catSessionRepo.save(session);
 
+            // แจ้งเตือนเมื่อสอบเสร็จ
+            try {
+                await this.notificationsService.create({
+                    user_id: session.user_id,
+                    title: session.passed ? 'ยินดีด้วย! คุณสอบผ่าน CAT 🎉' : 'สอบ CAT เสร็จสิ้น 💪',
+                    message: `คุณทำข้อสอบไปทั้งหมด ${session.num_items} ข้อ ค่าความสามารถสุดท้าย (θ) คือ ${session.current_theta.toFixed(2)}`,
+                    notification_type_id: session.passed ? 2 : 1,
+                    link_url: `/user/cat-exam/result/${session.session_id}`
+                });
+            } catch (error) {
+                console.error('Error sending CAT completion notification:', error);
+            }
+
             return {
                 message: 'จบการสอบ',
                 finished: true,
@@ -352,12 +478,36 @@ export class CATExamService {
             };
         } else {
             // เลือกข้อถัดไป
-            const itemBank = await this.getItemBankItems(session.item_bank_id);
+            const itemBankWithTopics = await this.getAvailableItemsWithTopics(
+                session.item_bank_id,
+            );
             const usedItemIds = new Set<number>(session.used_item_ids);
+
+            let eligibleItems = itemBankWithTopics.filter(
+                (i) => !usedItemIds.has(i.item_id),
+            );
+
+            // ใช้ Topic Balancing ถ้ากำหนดไว้
+            if (session.topic_proportions) {
+                const targetTopicId = this.selectNextTopicId(
+                    session,
+                    responses,
+                    itemBankWithTopics,
+                );
+                if (targetTopicId) {
+                    const filtered = eligibleItems.filter(
+                        (i) => i.topic_id === targetTopicId,
+                    );
+                    if (filtered.length > 0) {
+                        eligibleItems = filtered;
+                    }
+                }
+            }
+
             const nextItem = this.catService.selectNextItem(
                 session.current_theta,
-                itemBank,
-                usedItemIds,
+                eligibleItems,
+                new Set(), // ไม่ต้องกรอง used อีกเพราะ eligible คือ filtered แล้ว
             );
 
             if (!nextItem) {
@@ -374,6 +524,19 @@ export class CATExamService {
                 session.current_item_id = undefined;
 
                 await this.catSessionRepo.save(session);
+
+                // แจ้งเตือนเมื่อสอบเสร็จ (กรณีข้อสอบหมด)
+                try {
+                    await this.notificationsService.create({
+                        user_id: session.user_id,
+                        title: session.passed ? 'ยินดีด้วย! คุณสอบผ่าน CAT 🎉' : 'สอบ CAT เสร็จสิ้น 💪',
+                        message: `คุณทำข้อสอบไปทั้งหมด ${session.num_items} ข้อ (คลังข้อสอบหมด) ค่าความสามารถสุดท้าย (θ) คือ ${session.current_theta.toFixed(2)}`,
+                        notification_type_id: session.passed ? 2 : 1,
+                        link_url: `/user/cat-exam/result/${session.session_id}`
+                    });
+                } catch (error) {
+                    console.error('Error sending CAT completion notification:', error);
+                }
 
                 return {
                     message: 'จบการสอบ (ไม่มีข้อเหลือ)',
@@ -431,6 +594,21 @@ export class CATExamService {
             where: { item_bank_id: session.item_bank_id },
         });
 
+        // Fetch full item details for each response to show answers and explanations
+        const responsesWithDetails = await Promise.all((session.responses || []).map(async (resp: any) => {
+            const item = await this.itemRepo.findOne({
+                where: { item_id: resp.item_id },
+                relations: ['answer_options', 'situation']
+            });
+            return {
+                ...resp,
+                question_text: item?.question_text,
+                explanation: item?.explanation,
+                situation: item?.situation,
+                answer_options: item?.answer_options
+            };
+        }));
+
         return {
             session_id: session.session_id,
             item_bank_name: itemBank?.bank_name,
@@ -445,7 +623,7 @@ export class CATExamService {
             num_correct: session.num_correct,
             passed: session.passed,
             stop_reason: session.stop_reason,
-            responses: session.responses,
+            responses: responsesWithDetails,
             pass_percentile: session.final_theta
                 ? this.catService.calculatePassPercentile(session.final_theta)
                 : null,
@@ -580,5 +758,20 @@ export class CATExamService {
         }
 
         return missing;
+    }
+
+    /**
+     * ดึงค่าความสามารถล่าสุดของผู้ใช้
+     */
+    async getLatestAbility(userId: number) {
+        const lastSession = await this.catSessionRepo.findOne({
+            where: { user_id: userId, status: 'COMPLETED' },
+            order: { end_time: 'DESC' },
+        });
+
+        return {
+            theta: lastSession?.final_theta ?? 0.0,
+            has_history: !!lastSession,
+        };
     }
 }

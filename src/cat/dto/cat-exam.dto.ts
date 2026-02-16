@@ -1,9 +1,17 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, IsObject } from 'class-validator';
 
 export class StartCATExamDto {
-    @IsNotEmpty()
+    @IsOptional()
     @IsNumber()
-    item_bank_id: number;
+    item_bank_id?: number;
+
+    @IsOptional()
+    @IsNumber()
+    initial_theta?: number;
+
+    @IsOptional()
+    @IsObject()
+    topic_proportions?: Record<string, number>;
 
     @IsOptional()
     @IsNumber()

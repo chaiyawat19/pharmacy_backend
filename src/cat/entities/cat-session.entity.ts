@@ -14,8 +14,11 @@ export class CATSession {
     @Column({ type: 'integer' })
     user_id: number;
 
-    @Column({ type: 'integer' })
+    @Column({ type: 'integer', nullable: true })
     item_bank_id: number;
+
+    @Column({ type: 'jsonb', nullable: true })
+    topic_proportions: any; // { topic_id: weight_percentage }
 
     @Column({ type: 'float8', default: 0.0 })
     current_theta: number;

@@ -17,6 +17,15 @@ export class CATController {
     constructor(private readonly catExamService: CATExamService) { }
 
     /**
+     * ดึงค่าความสามารถล่าสุดของผู้ใช้
+     */
+    @Get('latest-ability')
+    async getLatestAbility(@Request() req) {
+        const userId = req.user.userId;
+        return this.catExamService.getLatestAbility(userId);
+    }
+
+    /**
      * เริ่มการสอบ CAT
      */
     @Post('start')
