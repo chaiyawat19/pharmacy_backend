@@ -42,7 +42,7 @@ export class NewsController {
       }),
     }))
   uploadFile(@UploadedFile() file: Express.Multer.File) {
-    return { url: `http://localhost:5000/uploads/${file.filename}` };
+    return { url: `${process.env.NEXT_PUBLIC_API_URL}/uploads/${file.filename}` };
   }
 
   @Post()
