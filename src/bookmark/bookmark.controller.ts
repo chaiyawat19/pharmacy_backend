@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { BookmarkService } from './bookmark.service';
 import { CreateBookmarkDto } from './dto/create-bookmark.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // ตรวจสอบ path ของ Guard
+import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 
 @Controller('bookmark')
 export class BookmarkController {
