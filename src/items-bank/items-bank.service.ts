@@ -19,6 +19,7 @@ import { ExamSession } from './entities/exam-session.entity';
 import { ExamResponse } from './entities/exam-response.entity';
 import { StartExamDto, SubmitExamDto } from './dto/exam.dto';
 import { UserItemMastery } from './entities/user_item_mastery.entity';
+import { CATSession } from '../cat/entities/cat-session.entity';
 
 @Injectable()
 export class ItemsBankService {
@@ -43,6 +44,8 @@ export class ItemsBankService {
     private readonly examResponseRepo: Repository<ExamResponse>,
     @InjectRepository(UserItemMastery)
     private readonly userItemMasteryRepo: Repository<UserItemMastery>,
+    @InjectRepository(CATSession)
+    private readonly catSessionRepo: Repository<CATSession>,
     private readonly dataSource: DataSource,
   ) { }
 
@@ -1071,65 +1074,128 @@ export class ItemsBankService {
     category_ids?: number[];
     item_bank_id?: number;
     status?: 'ALL' | 'COMPLETED' | 'IN_PROGRESS';
+    exam_type?: 'ALL' | 'NORMAL' | 'CAT';
   }) {
-    // สร้าง query builder
-    let query = this.examSessionRepo
-      .createQueryBuilder('session')
-      .leftJoinAndSelect('session.item_bank', 'item_bank')
-      .where('session.userId = :userId', { userId })
-      .andWhere('session.end_time IS NOT NULL'); // Only show completed exams
+    const examType = filters?.exam_type || 'ALL';
+    const allHistory: any[] = [];
 
-    // ถ้ามีการกรองตาม item_bank_id
-    if (filters?.item_bank_id) {
-      query = query.andWhere('session.itemBankId = :itemBankId', {
-        itemBankId: filters.item_bank_id
-      });
+    // 1. ดึงประวัติการสอบปกติ (Normal Exam)
+    if (examType === 'ALL' || examType === 'NORMAL') {
+      let query = this.examSessionRepo
+        .createQueryBuilder('session')
+        .leftJoinAndSelect('session.item_bank', 'item_bank')
+        .where('session.userId = :userId', { userId })
+        .andWhere('session.end_time IS NOT NULL');
+
+      if (filters?.item_bank_id) {
+        query = query.andWhere('session.itemBankId = :itemBankId', {
+          itemBankId: filters.item_bank_id
+        });
+      }
+
+      if (filters?.category_ids && filters.category_ids.length > 0) {
+        query = query
+          .innerJoin(
+            'item_bank_category',
+            'ibc',
+            'ibc.item_bank_id = item_bank.item_bank_id'
+          )
+          .andWhere('ibc.category_id IN (:...categoryIds)', {
+            categoryIds: filters.category_ids
+          });
+      }
+
+      const sessions = await query.orderBy('session.start_time', 'DESC').getMany();
+
+      const normalHistory = await Promise.all(
+        sessions.map(async (session) => {
+          const categoryRelations = await this.itemBankCategoryRepo.find({
+            where: { item_bank_id: session.itemBankId },
+            relations: ['category']
+          });
+
+          return {
+            session_id: Number(session.session_id),
+            item_bank_id: session.itemBankId,
+            item_bank_name: session.item_bank.bank_name,
+            status: 'COMPLETED',
+            start_time: session.start_time,
+            end_time: session.end_time,
+            final_score: session.final_score,
+            exam_type: 'NORMAL',
+            categories: categoryRelations.map(cr => ({
+              category_id: cr.category.category_id,
+              category_name: cr.category.category_name
+            }))
+          };
+        })
+      );
+      allHistory.push(...normalHistory);
     }
 
-    // Status filter removed as we only show completed exams now
+    // 2. ดึงประวัติการสอบ CAT
+    if (examType === 'ALL' || examType === 'CAT') {
+      let catQuery = this.catSessionRepo
+        .createQueryBuilder('cat')
+        .leftJoinAndMapOne('cat.item_bank', ItemsBank, 'item_bank', 'item_bank.item_bank_id = cat.item_bank_id')
+        .where('cat.user_id = :userId', { userId })
+        .andWhere('cat.status = :status', { status: 'COMPLETED' });
 
-    // ถ้ามีการกรองตาม category
-    if (filters?.category_ids && filters.category_ids.length > 0) {
-      query = query
-        .innerJoin(
-          'item_bank_category',
-          'ibc',
-          'ibc.item_bank_id = item_bank.item_bank_id'
-        )
-        .andWhere('ibc.category_id IN (:...categoryIds)', {
-          categoryIds: filters.category_ids
+      if (filters?.item_bank_id) {
+        catQuery = catQuery.andWhere('cat.item_bank_id = :itemBankId', {
+          itemBankId: filters.item_bank_id
         });
+      }
+
+      const catSessions = await catQuery.orderBy('cat.start_time', 'DESC').getMany();
+
+      const catHistory = await Promise.all(
+        catSessions.map(async (session: any) => {
+          let categories: { category_id: number, category_name: string }[] = [];
+          if (session.item_bank_id) {
+            const categoryRelations = await this.itemBankCategoryRepo.find({
+              where: { item_bank_id: session.item_bank_id },
+              relations: ['category']
+            });
+            categories = categoryRelations.map(cr => ({
+              category_id: cr.category.category_id,
+              category_name: cr.category.category_name
+            }));
+          }
+
+          return {
+            session_id: session.session_id,
+            item_bank_id: session.item_bank_id,
+            item_bank_name: session.item_bank?.bank_name || 'การสอบ CAT แบบกำหนดเอง',
+            status: 'COMPLETED',
+            start_time: session.start_time,
+            end_time: session.end_time,
+            // ใน CAT เราอาจจะใช้ theta คำนวณเป็น score หรือใช้ passed/failed (ในที่นี้ใช้ theta หรือ default 0)
+            final_score: session.final_theta !== null ? (session.passed ? 100 : 0) : 0,
+            theta: session.final_theta,
+            passed: session.passed,
+            exam_type: 'CAT',
+            categories: categories
+          };
+        })
+      );
+
+      // กรอง CAT ตามหมวดหมู่ถ้ามีการเลือก
+      let filteredCatHistory = catHistory;
+      if (filters?.category_ids && filters.category_ids.length > 0) {
+        const targetCategoryIds = filters.category_ids;
+        filteredCatHistory = catHistory.filter(cat =>
+          cat.categories.some(c => targetCategoryIds.includes(c.category_id))
+        );
+      }
+
+      allHistory.push(...filteredCatHistory);
     }
 
-    query = query.orderBy('session.start_time', 'DESC');
-
-    const sessions = await query.getMany();
-
-    // ดึงข้อมูล categories ของแต่ละ item bank
-    const sessionWithCategories = await Promise.all(
-      sessions.map(async (session) => {
-        const categoryRelations = await this.itemBankCategoryRepo.find({
-          where: { item_bank_id: session.itemBankId },
-          relations: ['category']
-        });
-
-        return {
-          session_id: Number(session.session_id),
-          item_bank_id: session.itemBankId,
-          item_bank_name: session.item_bank.bank_name,
-          status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS',
-          start_time: session.start_time,
-          end_time: session.end_time,
-          final_score: session.final_score,
-          categories: categoryRelations.map(cr => ({
-            category_id: cr.category.category_id,
-            category_name: cr.category.category_name
-          }))
-        };
-      })
+    // เรียงลำดับรวมทั้งหมดตามวันที่เริ่มสอบใหม่ไปเก่า
+    return allHistory.sort((a, b) =>
+      new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
     );
-
-    return sessionWithCategories;
   }
 
   /**

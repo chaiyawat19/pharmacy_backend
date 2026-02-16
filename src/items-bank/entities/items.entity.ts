@@ -11,6 +11,7 @@ import {
 
 import { ItemSituation } from './item_situations.entity';
 import { AnswerOption } from './answer_options.entity';
+import { ItemSubTopic } from './item_sub_topics.entity';
 
 @Entity('items')
 export class Item {
@@ -41,6 +42,9 @@ export class Item {
 
     @OneToMany(() => AnswerOption, (option) => option.item)
     answer_options: AnswerOption[];
+
+    @OneToMany(() => ItemSubTopic, (ist) => ist.item)
+    item_sub_topics: ItemSubTopic[];
 
     @Column({ type: 'varchar', length: 50, default: 'draft' })
     status: string;

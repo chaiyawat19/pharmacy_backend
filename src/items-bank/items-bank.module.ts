@@ -14,6 +14,8 @@ import { ExamSession } from './entities/exam-session.entity';
 import { ExamResponse } from './entities/exam-response.entity';
 import { UserItemMastery } from './entities/user_item_mastery.entity';
 
+import { CATSession } from '../cat/entities/cat-session.entity';
+
 @Module({
   imports: [TypeOrmModule.forFeature([
     ItemsBank,
@@ -25,7 +27,8 @@ import { UserItemMastery } from './entities/user_item_mastery.entity';
     ItemBankCategory,
     ExamSession,
     ExamResponse,
-    UserItemMastery
+    UserItemMastery,
+    CATSession
   ])],
   controllers: [ItemsBankController, ExamController],
   providers: [ItemsBankService],
