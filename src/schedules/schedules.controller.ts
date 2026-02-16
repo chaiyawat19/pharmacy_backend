@@ -9,15 +9,31 @@ import {
   Req,
   UseGuards,
   UnauthorizedException,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import { SchedulesService } from './schedules.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { JwtAuthGuard } from 'src/common/guard/jwt-auth.guard';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('schedules')
 export class SchedulesController {
   constructor(private readonly schedulesService: SchedulesService) { }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('bulk/all')
+  async removeAll(@Req() req) {
+    const userId = req.user.userId;
+    return this.schedulesService.removeAll(userId);
+  }
+  @UseGuards(JwtAuthGuard)
+  @Patch('bulk/status') // Path สำหรับอัปเดตสถานะทั้งหมด
+  async updateAllStatus(@Body('is_public') isPublic: boolean, @Req() req) {
+    const userId = req.user.userId;
+    return this.schedulesService.updateAllStatus(userId, isPublic);
+  }
 
   @UseGuards(JwtAuthGuard)
   @Post()
@@ -27,6 +43,16 @@ export class SchedulesController {
       throw new UnauthorizedException('ไม่พบ userId ใน Token');
     }
     return this.schedulesService.create(dto, userId);
+  }
+
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file')) // ชื่อ 'file' ต้องตรงกับที่ส่งจาก Frontend
+  async uploadPdf(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new Error('กรุณาอัปโหลดไฟล์ PDF');
+    }
+    const events = await this.schedulesService.extractEventsFromPdf(file);
+    return { events };
   }
 
   @Get()

@@ -12,6 +12,7 @@ import { University } from '../../universities/entities/university.entity';
 import { Role } from '../../roles/entities/role.entity';
 import { Exclude } from 'class-transformer';
 import { Note } from 'src/notes/entities/note.entity';
+import { Bookmark } from 'src/bookmark/entities/bookmark.entity';
 
 @Entity('users')
 export class User {
@@ -27,20 +28,16 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
-  // ✅ Google ไม่มีเบอร์
   @Column({ type: 'varchar', length: 20, nullable: true })
   tel: string | null;
 
-  // ✅ Google ไม่มี password
   @Column({ type: 'varchar', length: 255, nullable: true })
   @Exclude()
   password: string | null;
 
-  // ✅ Google ไม่มีวันเกิด
   @Column({ type: 'date', nullable: true })
   bod: Date | null;
 
-  // ✅ Google ยังไม่เลือกมหาลัย
   @Column({ type: 'integer', nullable: true })
   @Exclude()
   university_id: number | null;
@@ -57,7 +54,6 @@ export class User {
   @JoinColumn({ name: 'role_id' })
   role: Role;
 
-  // ✅ แยกว่า login แบบไหน
   @Column({
     type: 'varchar',
     length: 20,
@@ -79,4 +75,7 @@ export class User {
 
   @UpdateDateColumn({ type: 'timestamp with time zone' })
   updated_at: Date;
+
+  @OneToMany(() => Bookmark, (bookmark) => bookmark.user)
+  bookmarks: Bookmark[];
 }

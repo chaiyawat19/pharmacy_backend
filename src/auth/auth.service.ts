@@ -68,7 +68,6 @@ export class AuthService {
       role_id: user.role_id,
     });
   }
-
   async forgotPassword(email: string) {
     const user = await this.userService.findByEmail(email);
     if (!user) {
@@ -98,23 +97,17 @@ export class AuthService {
     if (!user) {
       throw new BadRequestException('Invalid Token: Not found in database');
     }
-
     const now = new Date();
-    console.log('User Expire Time (DB):', user.reset_password_expires);
-    console.log('Current Time (Now):', now);
-
     if (!user.reset_password_expires || user.reset_password_expires < now) {
       throw new BadRequestException(
         `Link Expired. DB: ${user.reset_password_expires} vs Now: ${now}`,
       );
     }
-
     try {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       user.password = hashedPassword;
       user.reset_password_token = null;
       user.reset_password_expires = null;
-
       return await this.userService.save(user);
     } catch (error) {
       throw new BadRequestException(

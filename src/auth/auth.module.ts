@@ -26,6 +26,6 @@ import { MailModule } from 'src/mail/mail.module';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, LocalStrategy, GoogleStrategy],
-  exports: [AuthService], //  export ถ้า module อื่นต้องใช้
+  exports: [AuthService],
 })
 export class AuthModule {}

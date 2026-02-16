@@ -17,6 +17,6 @@ import { UsersModule } from '../users/users.module';
   ],
   controllers: [NewsController],
   providers: [NewsService],
-  exports: [NewsService], // ใส่ไว้เผื่อโมดูลอื่นต้องการเรียกใช้
+  exports: [NewsService],
 })
 export class NewsModule { }
