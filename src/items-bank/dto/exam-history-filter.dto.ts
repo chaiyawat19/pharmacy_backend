@@ -21,4 +21,8 @@ export class ExamHistoryFilterDto {
     @IsOptional()
     @IsEnum(['ALL', 'COMPLETED', 'IN_PROGRESS'])
     status?: 'ALL' | 'COMPLETED' | 'IN_PROGRESS';
+
+    @IsOptional()
+    @IsEnum(['ALL', 'NORMAL', 'CAT'])
+    exam_type?: 'ALL' | 'NORMAL' | 'CAT';
 }

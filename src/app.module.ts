@@ -21,6 +21,7 @@ import { MailModule } from './mail/mail.module';
 import { SchedulesController } from './schedules/schedules.controller';
 import { SchedulesModule } from './schedules/schedules.module';
 import { NewsModule } from './news/news.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { NewsModule } from './news/news.module';
     MailModule,
     SchedulesModule,
     NewsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [
