@@ -11,7 +11,7 @@ export class CreateTopicDto {
 
   @IsOptional()
   @IsString()
-  description: string;
+  description?: string;
 }
 
 export class CreateSubTopicDto {
@@ -26,7 +26,7 @@ export class CreateSubTopicDto {
 
   @IsOptional()
   @IsString()
-  description: string;
+  description?: string;
 }
 
 
