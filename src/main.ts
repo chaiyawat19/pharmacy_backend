@@ -8,7 +8,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.enableCors({
-    origin: 'https://phamacyexam-frontend-production.up.railway.app',
+    origin: 'https://phamacyexam-frontend-fork-production.up.railway.app',
     credentials: true,
   });
 
