@@ -24,7 +24,7 @@ export class SubTopic {
     @Column({ type: 'text' })
     sub_topic_name: string;
 
-    @Column({ type: 'text' })
+    @Column({ type: 'text', nullable: true })
     description: string;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })

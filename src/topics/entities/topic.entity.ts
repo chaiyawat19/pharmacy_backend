@@ -14,7 +14,7 @@ export class Topic {
     @Column({ type: 'text' })
     topic_name: string;
 
-    @Column({ type: 'text' })
+    @Column({ type: 'text', nullable: true })
     description: string;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })

@@ -14,7 +14,7 @@ export class Category {
     @Column({ type: 'varchar', length: 255 })
     category_name: string;
 
-    @Column({ type: 'text' })
+    @Column({ type: 'text', nullable: true })
     category_description: string;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
