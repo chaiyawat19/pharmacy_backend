@@ -11,7 +11,7 @@ export class CreateItemsBankDto {
   @IsString()
   bank_name: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   description: string;
 
