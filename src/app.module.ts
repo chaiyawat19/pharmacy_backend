@@ -13,10 +13,15 @@ import { RolesGuard } from './common/guard/roles.guard';
 import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard ใหม่
 import { NotesModule } from './notes/notes.module';
 import { ChatModule } from './chat/chat.module';
+import { ItemsBankModule } from './items-bank/items-bank.module';
+import { TopicsModule } from './topics/topics.module';
+import { CategoriesModule } from './categories/categories.module';
+import { CATModule } from './cat/cat.module';
 import { MailModule } from './mail/mail.module';
 import { SchedulesController } from './schedules/schedules.controller';
 import { SchedulesModule } from './schedules/schedules.module';
 import { NewsModule } from './news/news.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { BookmarkModule } from './bookmark/bookmark.module';
 
 @Module({
@@ -32,7 +37,8 @@ import { BookmarkModule } from './bookmark/bookmark.module';
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_DATABASE'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: false,
+        synchronize: false, // ⚠️ ชั่วคราว! เปลี่ยนกลับเป็น false หลังสร้างตารางเสร็จ
+        autoLoadEntities: true,
       }),
       inject: [ConfigService],
     }),
@@ -42,9 +48,14 @@ import { BookmarkModule } from './bookmark/bookmark.module';
     AuthModule,
     NotesModule,
     ChatModule,
+    ItemsBankModule,
+    TopicsModule,
+    CategoriesModule,
+    CATModule,
     MailModule,
     SchedulesModule,
     NewsModule,
+    NotificationsModule,
     BookmarkModule,
   ],
   controllers: [AppController],
@@ -60,4 +71,4 @@ import { BookmarkModule } from './bookmark/bookmark.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }

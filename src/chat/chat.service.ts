@@ -44,15 +44,20 @@ export class ChatService {
         const payload = { user_id, session_id, message };
 
         try {
-            const response = await firstValueFrom(
-                this.httpService.post<N8NResponse>(n8nUrl, payload)
-            );
+            const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
+            const data = response.data;
+
+            // เช็คว่า n8n ส่ง error JSON กลับมาหรือไม่
+            if (data?.status === 'error') {
+                botReply = this.formatN8NErrorMessage(data);
+            } else {
+                botReply = this.cleanBotReply(data?.reply ?? '');
+            }
 
             botReply = response.data?.reply ?? '';
 
         } catch (error) {
-            console.error('Error calling n8n:', error.message);
-            botReply = 'ขออภัย เกิดข้อผิดพลาดในการประมวลผล (AI Service Error)';
+            botReply = this.handleN8NError(error);
         }
 
         const savedBotMessage = await this.messageRepo.save({
@@ -83,6 +88,13 @@ export class ChatService {
         return this.sessionRepo.delete({ session_id });
     }
 
+    async getAllSessions() {
+        return this.sessionRepo.find({
+            order: { created_at: "DESC" },
+            relations: ['user']
+        });
+    }
+
     async editMessage(message_id: number, message_text: string) {
 
         const existingMessage = await this.messageRepo.findOne({
@@ -106,15 +118,17 @@ export class ChatService {
         const payload = { user_id, session_id, message: message_text };
 
         try {
-            const response = await firstValueFrom(
-                this.httpService.post<N8NResponse>(n8nUrl, payload)
-            );
+            const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
+            const data = response.data;
 
-            botReply = response.data?.reply ?? '';
-
+            // เช็คว่า n8n ส่ง error JSON กลับมาหรือไม่
+            if (data?.status === 'error') {
+                botReply = this.formatN8NErrorMessage(data);
+            } else {
+                botReply = this.cleanBotReply(data?.reply ?? '');
+            }
         } catch (error) {
-            console.error('Error calling n8n:', error.message);
-            botReply = 'ขออภัย เกิดข้อผิดพลาดในการประมวลผล (AI Service Error)';
+            botReply = this.handleN8NError(error);
         }
 
         const savedBotMessage = await this.messageRepo.save({
@@ -124,5 +138,51 @@ export class ChatService {
         });
 
         return { user: updatedUserMessage, bot: savedBotMessage };
+    }
+
+    private cleanBotReply(reply: string): string {
+        // ลบข้อความประเภท [Used tools: ... ]] ออก (รวมถึงขึ้นบรรทัดใหม่ที่ตามมา)
+        return reply.replace(/^\[Used tools:[\s\S]*?\]\]\s*/i, '').trim();
+    }
+
+    private handleN8NError(error: any): string {
+        console.error('Full Error from n8n:', {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data
+        });
+
+        // ถ้า n8n ส่ง error JSON มาใน response.data ของ axios error
+        if (error.response?.data?.status === 'error') {
+            return this.formatN8NErrorMessage(error.response.data);
+        }
+
+        const status = error.response?.status;
+
+        if (status === 429) {
+            return 'ขณะนี้มีการเรียกใช้งาน AI ถี่เกินไป (Rate Limit) กรุณารอสัก 1-2 นาทีแล้วลองใหม่อีกครั้งครับ';
+        }
+
+        if (status >= 500) {
+            return 'ระบบประมวลผล AI (n8n) ขัดข้องชั่วคราว กำลังเร่งแก้ไขครับ';
+        }
+
+        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+            return 'การเชื่อมต่อกับ AI ใช้เวลานานเกินไป กรุณาลองส่งข้อความใหม่อีกครั้งครับ';
+        }
+
+        return `เกิดข้อผิดพลาดในการสื่อสารกับ AI (${error.message})`;
+    }
+
+    private formatN8NErrorMessage(data: any): string {
+        const msg = data.error_message || 'เกิดข้อผิดพลาดในการประมวลผล';
+        const desc = data.error_description ? ` (${data.error_description})` : '';
+
+        // ถ้าเป็นเรื่อง Rate Limit จากข้างใน n8n
+        if (msg.includes('too many requests') || msg.includes('limit')) {
+            return 'ขณะนี้ AI มีผู้ใช้งานจำนวนมาก (Rate Limit) กรุณาเว้นระยะเวลาสักครู่แล้วส่งใหม่ครับ';
+        }
+
+        return `AI แจ้งข้อผิดพลาด: ${msg}${desc}`;
     }
 }

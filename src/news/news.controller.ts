@@ -6,10 +6,13 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
+  Req,
 } from '@nestjs/common';
 import { NewsService } from './news.service';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { UpdateNewsDto } from './dto/update-news.dto';
+import { JwtAuthGuard } from 'src/common/guard/jwt-auth.guard';
 import { UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -17,7 +20,7 @@ import { extname } from 'path';
 
 @Controller('news')
 export class NewsController {
-  constructor(private readonly newsService: NewsService) {}
+  constructor(private readonly newsService: NewsService) { }
 
   @Post('auto-fetch')
   async autoFetch(@Body('url') url: string) {
@@ -39,12 +42,17 @@ export class NewsController {
       }),
     }))
   uploadFile(@UploadedFile() file: Express.Multer.File) {
-    return { url: `http://localhost:5000/uploads/${file.filename}` };
+    return { url: `${process.env.NEXT_PUBLIC_API_URL}/uploads/${file.filename}` };
   }
 
   @Post()
-  create(@Body() createNewsDto: CreateNewsDto) {
-    return this.newsService.create(createNewsDto);
+  @UseGuards(JwtAuthGuard)
+  create(@Body() createNewsDto: CreateNewsDto, @Req() req) {
+    const userId = req.user.userId;
+    return this.newsService.create({
+      ...createNewsDto,
+      author_id: userId
+    });
   }
 
   @Get()

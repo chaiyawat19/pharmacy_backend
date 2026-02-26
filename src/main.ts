@@ -25,6 +25,6 @@ async function bootstrap() {
     prefix: '/uploads/', // เวลาเรียกดูรูปจะเป็น http://localhost:3000/uploads/ชื่อไฟล์.jpg
   });
 
-  await app.listen(process.env.PORT ?? 5000);
+  await app.listen(process.env.PORT ?? 5000, '0.0.0.0');
 }
 bootstrap();

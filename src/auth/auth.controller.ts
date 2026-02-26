@@ -58,6 +58,18 @@ export class AuthController {
     return userWithoutPassword;
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  async logout(@Request() req, @Res({ passthrough: true }) res) {
+    // Clear any server-side session data if needed
+    // For JWT-based auth, the token invalidation happens on client-side
+    // But we can log the logout event or clear any refresh tokens here
+
+    return {
+      message: 'Logout successful'
+    };
+  }
+
   @Public()
   @Get('google')
   @UseGuards(AuthGuard('google'))

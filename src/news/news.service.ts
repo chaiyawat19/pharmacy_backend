@@ -7,6 +7,8 @@ import { NewsTag } from './entities/news_article_tags.entity';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { UpdateNewsDto } from './dto/update-news.dto';
 
+import { NotificationsService } from '../notifications/notifications.service';
+import { UsersService } from '../users/users.service';
 // เปลี่ยนมาใช้ Syntax เดียวกับ SchedulesService
 import { GoogleGenAI } from '@google/genai';
 import puppeteer from 'puppeteer';
@@ -22,6 +24,8 @@ export class NewsService {
     private readonly categoryRepository: Repository<NewsCategory>,
     @InjectRepository(NewsTag)
     private readonly tagRepository: Repository<NewsTag>,
+    private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService,
   ) {
     // ตั้งค่า Constructor แบบเดียวกับ SchedulesService
     this.ai = new GoogleGenAI({
@@ -116,6 +120,26 @@ export class NewsService {
     if (tagIds && tagIds.length > 0) {
       news.tags = await this.tagRepository.findBy({ tag_id: In(tagIds) });
     }
+
+    const savedNews = await this.newsRepository.save(news);
+
+    // แจ้งเตือนผู้ใช้ทุกคนเมื่อมีข่าวใหม่
+    try {
+      const users = await this.usersService.findAll();
+      await Promise.all(users.map(user =>
+        this.notificationsService.create({
+          user_id: user.user_id,
+          title: 'มีประกาศข่าวใหม่ 📢',
+          message: savedNews.title,
+          notification_type_id: 1, // Let's use 1 for news/info
+          link_url: `/user/news/${savedNews.article_id}`
+        })
+      ));
+    } catch (error) {
+      console.error('Error sending news notifications:', error);
+    }
+
+    return savedNews;
     return await this.newsRepository.save(news);
   }
 
