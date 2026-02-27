@@ -36,4 +36,7 @@ export class Schedule {
 
   @Column()
   user_id: number;
+
+  @Column("text", { array: true, nullable: true }) // เปลี่ยนเป็นแบบนี้
+  type_event: string[];
 }

@@ -17,7 +17,7 @@ export class ItemsBank {
   @Column({ type: 'varchar', length: 255 })
   description: string;
 
-  @Column({ type: 'int8'})
+  @Column({ type: 'int8' })
   duration: number;
 
   @Column({ type: 'boolean'})

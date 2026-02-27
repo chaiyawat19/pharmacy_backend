@@ -22,10 +22,10 @@ export class ItemSituation {
     @JoinColumn({ name: 'item_bank_id' })
     item_bank: ItemsBank;
 
-    @Column({ type: 'varchar', length: 255 })
+    @Column({ type: 'text' }) // เปลี่ยนจาก varchar เป็น text
     situation_text: string;
 
-    @Column({ type: 'varchar', length: 255 })
+    @Column({ type: 'text', nullable: true }) // Image URL ก็ควรเผื่อไว้เผื่อยาวมาก
     situation_image_url: string;
 
     @Column({ type: 'integer', default: 1 })

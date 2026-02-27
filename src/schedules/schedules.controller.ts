@@ -46,13 +46,15 @@ export class SchedulesController {
   }
 
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file')) // ชื่อ 'file' ต้องตรงกับที่ส่งจาก Frontend
+  @UseInterceptors(FileInterceptor('file'))
   async uploadPdf(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new Error('กรุณาอัปโหลดไฟล์ PDF');
     }
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const events = await this.schedulesService.extractEventsFromPdf(file);
-    return { events };
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+    return events; // คืนค่าเป็น Array ออกไปตรงๆ เลย
   }
 
   @Get()
