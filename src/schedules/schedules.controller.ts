@@ -26,7 +26,7 @@ export class SchedulesController {
   @Delete('bulk/all')
   async removeAll(@Req() req) {
     const userId = req.user.userId;
-    return this.schedulesService.removeAll(userId);
+    return this.schedulesService.remove(userId);
   }
   @UseGuards(JwtAuthGuard)
   @Patch('bulk/status') // Path สำหรับอัปเดตสถานะทั้งหมด
