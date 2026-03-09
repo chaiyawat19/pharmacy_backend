@@ -44,17 +44,21 @@ export class CATService {
     }
 
     /**
-     * เลือกข้อถัดไป (Maximum Information)
-     * @param currentTheta ความสามารถปัจจุบันของผู้สอบ
-     * @param itemBank คลังข้อสอบทั้งหมด
-     * @param usedItemIds ข้อที่ใช้ไปแล้ว
+     * เลือกข้อถัดไป ด้วย a-Stratified Maximum Fisher Information
+     *
+     * CATsim standard: แบ่งข้อสอบเป็น strata ตาม discrimination (a)
+     * ช่วงแรก → ใช้ข้อ a ต่ำ  (stratum 1)
+     * ช่วงกลาง → ใช้ข้อ a กลาง (stratum 2)
+     * ช่วงท้าย → ใช้ข้อ a สูง  (stratum 3)
+     * ภายในแต่ละ stratum เลือกข้อที่ให้ MFI สูงสุด ณ theta ปัจจุบัน
      */
     selectNextItem(
         currentTheta: number,
         itemBank: any[],
         usedItemIds: Set<number>,
+        numAnsweredSoFar: number = 0,
+        maxItems: number = 50,
     ): any | null {
-        // หาข้อที่ยังไม่ได้ใช้
         const eligibleItems = itemBank.filter(
             (item) => !usedItemIds.has(item.item_id),
         );
@@ -63,22 +67,39 @@ export class CATService {
             return null;
         }
 
-        // เลือกข้อที่ให้ Information สูงสุด
+        // ─── a-Stratified Exposure Control ────────────────────────────────
+        const NUM_STRATA = 3;
+        const progressRatio = maxItems > 0 ? numAnsweredSoFar / maxItems : 0;
+        const currentStratum = Math.min(
+            Math.floor(progressRatio * NUM_STRATA),
+            NUM_STRATA - 1,
+        );
+
+        const aValues = [...eligibleItems]
+            .map((i) => i.irt_a_discrimination)
+            .sort((x, y) => x - y);
+        const strataSize = Math.ceil(aValues.length / NUM_STRATA);
+        const aMax =
+            aValues[Math.min((currentStratum + 1) * strataSize - 1, aValues.length - 1)];
+
+        let candidates = eligibleItems.filter(
+            (item) => item.irt_a_discrimination <= aMax,
+        );
+        if (candidates.length === 0) candidates = eligibleItems;
+
+        // ─── Maximum Fisher Information ภายใน stratum ────────────────────
         let bestItem: any = null;
         let maxInfo = -1;
 
-        for (const item of eligibleItems) {
+        for (const item of candidates) {
             const irtItem: IRTItem = {
                 a: item.irt_a_discrimination,
                 b: item.irt_b_difficulty,
                 c: item.irt_c_guessing,
             };
-
             const info = this.irtService.information(currentTheta, irtItem);
-            const infoWithNoise = info * (0.95 + Math.random() * 0.1); // เพิ่ม randomization
-
-            if (infoWithNoise > maxInfo) {
-                maxInfo = infoWithNoise;
+            if (info > maxInfo) {
+                maxInfo = info;
                 bestItem = item;
             }
         }

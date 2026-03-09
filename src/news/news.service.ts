@@ -123,25 +123,34 @@ export class NewsService {
 
     const savedNews = await this.newsRepository.save(news);
 
-    // แจ้งเตือนผู้ใช้ทุกคนเมื่อมีข่าวใหม่
+    // แจ้งเตือนผู้ใช้ทุกคนเมื่อมีข่าวใหม่ (non-blocking)
+    this.notifyAllUsersNewArticle(savedNews).catch(err =>
+      console.error('Error sending news notifications:', err)
+    );
+
+    return savedNews;
+  }
+
+  /** ส่ง notification ข่าวสารไปยัง user ทุกคน (role_id = 1) แบบ non-blocking */
+  private async notifyAllUsersNewArticle(savedNews: NewsArticle) {
     try {
       const users = await this.usersService.findAll();
-      await Promise.all(users.map(user =>
-        this.notificationsService.create({
-          user_id: user.user_id,
-          title: 'มีประกาศข่าวใหม่ 📢',
-          message: savedNews.title,
-          notification_type_id: 1, // Let's use 1 for news/info
-          link_url: `/user/news/${savedNews.article_id}`
-        })
-      ));
+      await Promise.all(
+        users.map(user =>
+          this.notificationsService.create({
+            user_id: user.user_id,
+            title: `📢 ข่าวสารใหม่: ${savedNews.title}`,
+            message: savedNews.excerpt ?? savedNews.title,
+            notification_type_id: 2, // ประเภท: ข่าวสาร (ไอคอนสีส้ม)
+            link_url: `/user/newsdetail/${savedNews.article_id}`,
+          })
+        )
+      );
     } catch (error) {
       console.error('Error sending news notifications:', error);
     }
-
-    return savedNews;
-    return await this.newsRepository.save(news);
   }
+
 
   async update(id: number, updateNewsDto: UpdateNewsDto) {
     const { categoryIds, tagIds, ...articleData } = updateNewsDto;

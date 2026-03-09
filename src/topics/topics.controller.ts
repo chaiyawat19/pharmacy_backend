@@ -33,6 +33,11 @@ export class TopicsController {
     return this.topicsService.findAll();
   }
 
+  @Get('stats')
+  getTopicStats() {
+    return this.topicsService.getTopicStats();
+  }
+
   @Get('sub-topics')
   findAllSubTopics() {
     return this.topicsService.findAllSubTopics();

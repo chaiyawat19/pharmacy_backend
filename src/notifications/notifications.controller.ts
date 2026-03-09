@@ -10,6 +10,7 @@ import {
     Request,
 } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
+import { CreateNotificationDto } from './dto/notification.dto';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 
 @Controller('notifications')
@@ -27,6 +28,24 @@ export class NotificationsController {
     getUnreadCount(@Request() req) {
         const userId = req.user.userId;
         return this.notificationsService.findUnreadCount(userId);
+    }
+
+    /** Send notification to specific user (admin only) */
+    @Post('send')
+    async create(@Body() dto: CreateNotificationDto) {
+        try {
+            return await this.notificationsService.create(dto);
+        } catch (err) {
+            console.error('[NotificationsController] POST /send error:', err);
+            throw err;
+        }
+    }
+
+
+    /** Broadcast to all connected users (admin only) */
+    @Post('broadcast')
+    broadcast(@Body() dto: Omit<CreateNotificationDto, 'user_id'>) {
+        return this.notificationsService.createAndBroadcast(dto);
     }
 
     @Patch(':id/read')

@@ -19,6 +19,11 @@ export class CategoriesController {
     return this.categoriesService.findAll();
   }
 
+  @Get('with-banks')
+  findAllWithBanks() {
+    return this.categoriesService.findAllWithBanks();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.categoriesService.findOne(+id);

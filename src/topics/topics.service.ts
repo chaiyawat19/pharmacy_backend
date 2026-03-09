@@ -5,6 +5,7 @@ import { Topic } from './entities/topic.entity';
 import { SubTopic } from './entities/sub-topics.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ItemSubTopic } from '../items-bank/entities/item_sub_topics.entity';
 
 @Injectable()
 export class TopicsService {
@@ -13,6 +14,8 @@ export class TopicsService {
     private readonly topicRepository: Repository<Topic>,
     @InjectRepository(SubTopic)
     private readonly subTopicRepository: Repository<SubTopic>,
+    @InjectRepository(ItemSubTopic)
+    private readonly itemSubTopicRepo: Repository<ItemSubTopic>,
   ) { }
 
   create(createTopicDto: CreateTopicDto) {
@@ -119,5 +122,42 @@ export class TopicsService {
 
   removeSubTopic(id: number) {
     return this.subTopicRepository.delete(id);
+  }
+
+  /**
+   * Returns item counts aggregated by topic and sub-topic (for pie charts)
+   */
+  async getTopicStats() {
+    const allTopics = await this.topicRepository.find({ order: { topic_id: 'ASC' } });
+    const allSubTopics = await this.subTopicRepository.find({ order: { sub_topic_id: 'ASC' } });
+    const allLinks = await this.itemSubTopicRepo.find({ relations: ['sub_topic'] });
+
+    // Count items per sub-topic
+    const subTopicCountMap = new Map<number, number>();
+    allLinks.forEach(link => {
+      const id = link.sub_topic_id;
+      subTopicCountMap.set(id, (subTopicCountMap.get(id) ?? 0) + 1);
+    });
+
+    // Aggregate per topic
+    const subTopicsWithCount = allSubTopics.map(st => ({
+      ...st,
+      item_count: subTopicCountMap.get(st.sub_topic_id) ?? 0,
+    }));
+
+    const topicsWithCount = allTopics.map(t => {
+      const mySubTopics = subTopicsWithCount.filter(st => st.topic_id === t.topic_id);
+      const topicItemCount = mySubTopics.reduce((sum, st) => sum + st.item_count, 0);
+      return {
+        ...t,
+        item_count: topicItemCount,
+        sub_topics: mySubTopics,
+      };
+    });
+
+    return {
+      total_items: allLinks.length,
+      by_topic: topicsWithCount,
+    };
   }
 }

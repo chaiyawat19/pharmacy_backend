@@ -20,7 +20,7 @@ export class Notification {
     @JoinColumn({ name: 'user_id' })
     user: User;
 
-    @Column({ type: 'integer', nullable: true })
+    @Column({ type: 'integer', default: 4 })
     notification_type_id: number;
 
     @Column({ type: 'varchar', length: 255 })

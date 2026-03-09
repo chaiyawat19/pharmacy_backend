@@ -23,6 +23,8 @@ import { SchedulesModule } from './schedules/schedules.module';
 import { NewsModule } from './news/news.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BookmarkModule } from './bookmark/bookmark.module';
+import { IrtModule } from './irt/irt.module';
+
 
 @Module({
   imports: [
@@ -57,6 +59,8 @@ import { BookmarkModule } from './bookmark/bookmark.module';
     NewsModule,
     NotificationsModule,
     BookmarkModule,
+    IrtModule,
+
   ],
   controllers: [AppController],
   providers: [

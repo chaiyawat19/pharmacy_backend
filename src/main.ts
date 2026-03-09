@@ -4,13 +4,17 @@ import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.enableCors({
-    origin: ['https://phamacyexam-frontend-fork-production.up.railway.app', 'localhost:8080'],
+    origin: ['https://phamacyexam-frontend-fork-production.up.railway.app', 'http://localhost:8080'],
     credentials: true,
   });
+
+  // Enable WebSocket with Socket.io
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call

@@ -13,23 +13,30 @@ import { ItemBankCategory } from './entities/item_bank_category.entity';
 import { ExamSession } from './entities/exam-session.entity';
 import { ExamResponse } from './entities/exam-response.entity';
 import { UserItemMastery } from './entities/user_item_mastery.entity';
-
+import { User } from '../users/entities/user.entity';
+import { Notification } from '../notifications/entities/notification.entity';
 import { CATSession } from '../cat/entities/cat-session.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([
-    ItemsBank,
-    ItemSituation,
-    Item,
-    ItemBankItem,
-    AnswerOption,
-    ItemSubTopic,
-    ItemBankCategory,
-    ExamSession,
-    ExamResponse,
-    UserItemMastery,
-    CATSession
-  ])],
+  imports: [
+    TypeOrmModule.forFeature([
+      ItemsBank,
+      ItemSituation,
+      Item,
+      ItemBankItem,
+      AnswerOption,
+      ItemSubTopic,
+      ItemBankCategory,
+      ExamSession,
+      ExamResponse,
+      UserItemMastery,
+      CATSession,
+      User,
+      Notification,
+    ]),
+    NotificationsModule,
+  ],
   controllers: [ItemsBankController, ExamController],
   providers: [ItemsBankService],
 })

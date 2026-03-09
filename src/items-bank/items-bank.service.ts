@@ -20,6 +20,9 @@ import { ExamResponse } from './entities/exam-response.entity';
 import { StartExamDto, SubmitExamDto } from './dto/exam.dto';
 import { UserItemMastery } from './entities/user_item_mastery.entity';
 import { CATSession } from '../cat/entities/cat-session.entity';
+import { User } from '../users/entities/user.entity';
+import { Notification } from '../notifications/entities/notification.entity';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class ItemsBankService {
@@ -46,6 +49,11 @@ export class ItemsBankService {
     private readonly userItemMasteryRepo: Repository<UserItemMastery>,
     @InjectRepository(CATSession)
     private readonly catSessionRepo: Repository<CATSession>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
+    @InjectRepository(Notification)
+    private readonly notificationRepo: Repository<Notification>,
+    private readonly notificationsGateway: NotificationsGateway,
     private readonly dataSource: DataSource,
   ) { }
 
@@ -67,7 +75,57 @@ export class ItemsBankService {
       await this.itemBankCategoryRepo.save(categoryRelations);
     }
 
+    // ── แจ้งเตือนผู้ใช้ทุกคน (role_id = 1) เกี่ยวกับชุดข้อสอบใหม่ (เฉพาะเมื่อเปิดใช้งาน) ──
+    if (savedBank.is_active) {
+      this.notifyAllUsersNewExamBank(savedBank).catch(err =>
+        console.error('Failed to send exam bank notifications:', err)
+      );
+    }
+
     return savedBank;
+  }
+
+  /** ส่ง notification ไปยัง user ทุกคน (role_id = 1) แบบ non-blocking */
+  private async notifyAllUsersNewExamBank(bank: ItemsBank) {
+    const title = `📚 ชุดข้อสอบใหม่: ${bank.bank_name}`;
+    const message = bank.description
+      ? `มีชุดข้อสอบใหม่ "${bank.bank_name}" เพิ่มเข้ามาแล้ว — ${bank.description}`
+      : `มีชุดข้อสอบใหม่ "${bank.bank_name}" เพิ่มเข้ามาแล้ว`;
+    const link_url = `/user/examset`;
+    const notification_type_id = 3; // ประเภท: ชุดข้อสอบ
+
+    // ดึง user ทุกคนที่เป็น role_id = 1 (ผู้ใช้ทั่วไป)
+    const users = await this.userRepo.find({ where: { role_id: 1 } });
+
+    // บันทึก notification ใน DB สำหรับแต่ละ user + push WebSocket
+    const notificationPayloadBase = {
+      title,
+      message,
+      link_url,
+      notification_type_id,
+      is_read: false,
+      created_at: new Date(),
+    };
+
+    const notificationEntities = users.map(u =>
+      this.notificationRepo.create({
+        user_id: u.user_id,
+        title,
+        message,
+        link_url,
+        notification_type_id,
+      })
+    );
+
+    const saved = await this.notificationRepo.save(notificationEntities);
+
+    // Push notification ผ่าน WebSocket ให้ user ที่ออนไลน์อยู่
+    for (const n of saved) {
+      this.notificationsGateway.sendNotificationToUser(n.user_id, {
+        ...notificationPayloadBase,
+        notification_id: n.notification_id,
+      });
+    }
   }
 
   async getBank() {
@@ -543,6 +601,7 @@ export class ItemsBankService {
 
   async update(id: number, updateItemsBankDto: UpdateItemsBankDto) {
     const { category_ids, ...bankData } = updateItemsBankDto;
+    const oldBank = await this.bankRepo.findOneBy({ item_bank_id: id });
 
     // Update bank data
     await this.bankRepo.update({ item_bank_id: id }, bankData);
@@ -564,8 +623,22 @@ export class ItemsBankService {
       }
     }
 
-    return this.findOne(id);
+    const updatedBank = await this.findOne(id);
+    
+    // แจ้งเตือนเมื่อเปลี่ยนสถานะจาก ปิด เป็น เปิด
+    if (oldBank && !oldBank.is_active && updatedBank.is_active) {
+        // ดึง entity หลักเพื่อส่งให้ notify method
+        const bankEntity = await this.bankRepo.findOneBy({ item_bank_id: id });
+        if (bankEntity) {
+            this.notifyAllUsersNewExamBank(bankEntity).catch(err =>
+                console.error('Failed to send exam bank notifications on update:', err)
+            );
+        }
+    }
+
+    return updatedBank;
   }
+
 
   async remove(id: number) {
     const queryRunner = this.bankRepo.manager.connection.createQueryRunner();
@@ -824,6 +897,24 @@ export class ItemsBankService {
       item_bank_id: savedSession.itemBankId,
       start_time: savedSession.start_time
     };
+  }
+
+  async cancelExam(userId: number, sessionId: number) {
+    const session = await this.examSessionRepo.findOne({
+      where: { session_id: sessionId, userId: userId }
+    });
+
+    // ถ้าไม่มี session หรือ submit แล้ว (มี end_time) ให้ ignore
+    if (!session || session.end_time) {
+      return { message: 'ไม่มี session ที่ต้องลบ', cancelled: false };
+    }
+
+    // ลบ responses ก่อน (foreign key)
+    await this.examResponseRepo.delete({ session_id: sessionId });
+    // ลบ session
+    await this.examSessionRepo.delete({ session_id: sessionId });
+
+    return { message: 'ยกเลิกการสอบสำเร็จ — ไม่บันทึกประวัติ', cancelled: true };
   }
 
   async submitExam(userId: number, sessionId: number, submitExamDto: SubmitExamDto) {
