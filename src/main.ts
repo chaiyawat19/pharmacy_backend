@@ -4,6 +4,7 @@ import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -15,6 +16,9 @@ async function bootstrap() {
     ],
     credentials: true,
   });
+
+  // Enable WebSocket with Socket.io
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call

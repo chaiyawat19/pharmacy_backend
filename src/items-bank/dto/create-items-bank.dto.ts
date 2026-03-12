@@ -23,6 +23,10 @@ export class CreateItemsBankDto {
   @IsArray()
   @IsNumber({}, { each: true })
   category_ids?: number[];
+
+  @IsOptional()
+  @IsNotEmpty()
+  is_active?: boolean;
 }
 
 

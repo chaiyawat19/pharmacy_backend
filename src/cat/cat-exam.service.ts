@@ -57,11 +57,20 @@ export class CATExamService {
             await this.validateItemBankForCAT(item_bank_id, minItemsRequired);
         }
 
+        // ดึงค่า theta จาก session ก่อนหน้าของ user เพื่อใช้เป็น Bayesian prior
+        // (ถ้า user ระบุ initial_theta มาด้วยตัวเองก็ใช้ตามนั้น)
+        let priorTheta = initial_theta ?? null;
+        if (priorTheta === null || priorTheta === undefined) {
+            const lastAbility = await this.getLatestAbility(userId);
+            priorTheta = lastAbility.has_history ? lastAbility.theta : 0.0;
+        }
+
         // สร้าง CAT session ใหม่
         const session = this.catSessionRepo.create({
             user_id: userId,
             item_bank_id: item_bank_id,
-            current_theta: initial_theta || 0.0,
+            current_theta: priorTheta,
+            prior_theta: priorTheta,      // เก็บ prior ไว้ใช้ตลอด session
             current_se: 999.0,
             num_items: 0,
             num_correct: 0,
@@ -414,7 +423,11 @@ export class CATExamService {
             })
             .filter((r) => r !== null) as IRTResponse[];
 
-        const estimation = this.irtService.estimateThetaEAP(irtResponses);
+        const estimation = this.irtService.estimateThetaEAP(
+            irtResponses,
+            session.prior_theta ?? 0.0,  // Bayesian prior mean จาก session ก่อนหน้า
+            1.0,                          // prior SD = 1 (standard)
+        );
         session.current_theta = estimation.theta;
         session.current_se = estimation.se;
 
@@ -507,7 +520,9 @@ export class CATExamService {
             const nextItem = this.catService.selectNextItem(
                 session.current_theta,
                 eligibleItems,
-                new Set(), // ไม่ต้องกรอง used อีกเพราะ eligible คือ filtered แล้ว
+                new Set(), // eligible คือ filtered แล้ว ไม่ต้องกรองซ้ำ
+                session.num_items,       // สำหรับ a-stratified
+                session.max_items,       // สำหรับ a-stratified
             );
 
             if (!nextItem) {
@@ -605,7 +620,11 @@ export class CATExamService {
                 question_text: item?.question_text,
                 explanation: item?.explanation,
                 situation: item?.situation,
-                answer_options: item?.answer_options
+                answer_options: item?.answer_options,
+                // IRT parameters — used by frontend to draw Item Information & Difficulty charts
+                irt_a: item?.irt_a_discrimination ?? null,
+                irt_b: item?.irt_b_difficulty ?? null,
+                irt_c: item?.irt_c_guessing ?? null,
             };
         }));
 
@@ -773,5 +792,182 @@ export class CATExamService {
             theta: lastSession?.final_theta ?? 0.0,
             has_history: !!lastSession,
         };
+    }
+
+    // ==================== Admin Analytics ====================
+
+    /**
+     * [Admin] Session analytics overview
+     */
+    async getAdminAnalytics() {
+        const sessions = await this.catSessionRepo.find({
+            where: { status: 'COMPLETED' },
+            order: { end_time: 'DESC' },
+        });
+
+        const total = sessions.length;
+        const passed = sessions.filter(s => s.passed).length;
+        const failed = total - passed;
+        const avgTheta = total > 0
+            ? sessions.reduce((sum, s) => sum + (s.final_theta ?? 0), 0) / total
+            : 0;
+        const avgSE = total > 0
+            ? sessions.reduce((sum, s) => sum + (s.final_se ?? 0), 0) / total
+            : 0;
+        const avgItems = total > 0
+            ? sessions.reduce((sum, s) => sum + (s.num_items ?? 0), 0) / total
+            : 0;
+
+        // Theta distribution: bins of width 0.5 from -3 to 3
+        const BINS = [-3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3];
+        const thetaDist = BINS.slice(0, -1).map((lo, i) => {
+            const hi = BINS[i + 1];
+            const count = sessions.filter(s => {
+                const t = s.final_theta ?? 0;
+                return t >= lo && t < hi;
+            }).length;
+            return { range: `${lo}~${hi}`, count };
+        });
+
+        // Stop reason breakdown
+        const stopReasons: Record<string, number> = {};
+        sessions.forEach(s => {
+            const r = s.stop_reason ?? 'unknown';
+            stopReasons[r] = (stopReasons[r] ?? 0) + 1;
+        });
+
+        // Recent 10 sessions
+        const recent = sessions.slice(0, 10).map(s => ({
+            session_id: s.session_id,
+            user_id: s.user_id,
+            final_theta: s.final_theta,
+            final_se: s.final_se,
+            num_items: s.num_items,
+            passed: s.passed,
+            stop_reason: s.stop_reason,
+            end_time: s.end_time,
+        }));
+
+        return {
+            total_sessions: total,
+            passed,
+            failed,
+            pass_rate: total > 0 ? +((passed / total) * 100).toFixed(1) : 0,
+            avg_theta: +avgTheta.toFixed(3),
+            avg_se: +avgSE.toFixed(3),
+            avg_items: +avgItems.toFixed(1),
+            theta_distribution: thetaDist,
+            stop_reason_breakdown: stopReasons,
+            recent_sessions: recent,
+        };
+    }
+
+    /**
+     * [Admin] Item exposure report
+     */
+    async getItemExposureReport() {
+        const sessions = await this.catSessionRepo.find({ where: { status: 'COMPLETED' } });
+        const totalSessions = sessions.length;
+
+        const exposureMap: Record<number, { count: number; correct: number; item_id: number }> = {};
+        sessions.forEach(session => {
+            (session.responses || []).forEach((resp: any) => {
+                if (!exposureMap[resp.item_id]) {
+                    exposureMap[resp.item_id] = { item_id: resp.item_id, count: 0, correct: 0 };
+                }
+                exposureMap[resp.item_id].count++;
+                if (resp.is_correct) exposureMap[resp.item_id].correct++;
+            });
+        });
+
+        const items = await this.itemRepo.find();
+        const itemMap = new Map(items.map(i => [i.item_id, i]));
+
+        const report = Object.values(exposureMap)
+            .map(e => {
+                const item = itemMap.get(e.item_id);
+                return {
+                    item_id: e.item_id,
+                    exposure_count: e.count,
+                    exposure_rate: totalSessions > 0 ? +(e.count / totalSessions).toFixed(3) : 0,
+                    correct_rate: e.count > 0 ? +(e.correct / e.count).toFixed(3) : 0,
+                    irt_b: item?.irt_b_difficulty ?? null,
+                    question_preview: item?.question_text?.substring(0, 60) ?? '',
+                    flag_overexposed: totalSessions > 0 && (e.count / totalSessions) > 0.3,
+                };
+            })
+            .sort((a, b) => b.exposure_count - a.exposure_count);
+
+        return {
+            total_sessions: totalSessions,
+            total_unique_items: report.length,
+            overexposed_count: report.filter(r => r.flag_overexposed).length,
+            items: report,
+        };
+    }
+
+    /**
+     * [Admin] Test Information Function for a specific bank
+     */
+    async getBankTIF(bankId: number) {
+        const bankItems = await this.itemBankItemRepo.find({
+            where: { item_bank_id: bankId },
+            relations: ['item'],
+        });
+
+        const validItems = bankItems
+            .map(bi => bi.item)
+            .filter(item => this.isValidIRTItem(item));
+
+        const THETA_RANGE: number[] = [];
+        for (let t = -4; t <= 4; t += 0.1) {
+            THETA_RANGE.push(+t.toFixed(2));
+        }
+
+        const tifData = THETA_RANGE.map(theta => {
+            const totalInfo = validItems.reduce((sum, item) => {
+                const a = item.irt_a_discrimination!;
+                const b = item.irt_b_difficulty!;
+                const c = item.irt_c_guessing!;
+                const P = c + (1 - c) / (1 + Math.exp(-a * (theta - b)));
+                const info = (a * a * Math.pow(P - c, 2) * (1 - P)) /
+                    (Math.pow(1 - c, 2) * (P || 0.0001));
+                return sum + info;
+            }, 0);
+            return { theta, info: +totalInfo.toFixed(4), se: totalInfo > 0 ? +(1 / Math.sqrt(totalInfo)).toFixed(4) : 9.99 };
+        });
+
+        const bank = await this.itemsBankRepo.findOne({ where: { item_bank_id: bankId } });
+        return {
+            bank_name: bank?.bank_name,
+            num_items: validItems.length,
+            tif: tifData,
+        };
+    }
+
+    /**
+     * [Admin] Trigger IRT calibration via python service
+     */
+    async triggerCalibration(bankId?: number) {
+        try {
+            const irtServiceUrl = process.env.IRT_SERVICE_URL || 'http://localhost:8001';
+            const endpoint = `${irtServiceUrl}/calibrate${bankId ? `?bank_id=${bankId}` : ''}`;
+
+            // Fire-and-forget style — don't await long calibration
+            fetch(endpoint, { method: 'POST' }).catch(() => {
+                // IRT service may be offline — just log
+            });
+
+            return {
+                status: 'triggered',
+                message: `IRT calibration triggered${bankId ? ` for bank ${bankId}` : ' for all banks'}`,
+                irt_service_url: irtServiceUrl,
+            };
+        } catch (error) {
+            return {
+                status: 'error',
+                message: 'IRT calibration service could not be reached. Is irt_service running?',
+            };
+        }
     }
 }

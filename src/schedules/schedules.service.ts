@@ -1,9 +1,12 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { GoogleGenAI } from '@google/genai';
+import { Schedule } from './entities/schedule.entity';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
-import { Schedule } from './entities/schedule.entity';
-import { Repository } from 'typeorm';
-import { InjectRepository } from '@nestjs/typeorm';
+import { NotificationsService } from '../notifications/notifications.service';
+import { UsersService } from '../users/users.service';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 @Injectable()
@@ -13,6 +16,8 @@ export class SchedulesService {
   constructor(
     @InjectRepository(Schedule)
     private readonly scheduleRepo: Repository<Schedule>,
+    private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService,
   ) {
     // แนะนำ: ใช้ ConfigService ดึง API Key จาก .env
     this.genAI = new GoogleGenerativeAI('AIzaSyCuvm1vI8Eun2vWXQb2BJmEJauQvI656Ds');
@@ -72,9 +77,6 @@ export class SchedulesService {
     }
   }
 
-  /**
-   * Create: บันทึกลง Database พร้อมตรวจสอบวันที่
-   */
   async create(createScheduleDto: CreateScheduleDto, userId: number) {
     if (!userId) throw new UnauthorizedException('กรุณา Login ใหม่');
 
@@ -109,8 +111,42 @@ export class SchedulesService {
       user_id: userId,
       is_public: createScheduleDto.is_public ?? true,
     });
+    
+    const savedSchedule = await this.scheduleRepo.save(newSchedule);
 
-    return await this.scheduleRepo.save(newSchedule);
+    // แจ้งเตือนผู้ใช้ทุกคนเมื่อมีกำหนดการใหม่ (เฉพาะตัวที่เป็น Public)
+    if (savedSchedule.is_public) {
+        this.notifyAllUsersNewSchedule(savedSchedule).catch(err => 
+            console.error('Failed to send schedule notifications:', err)
+        );
+    }
+
+    return savedSchedule;
+  }
+
+  private async notifyAllUsersNewSchedule(schedule: Schedule) {
+    try {
+        const users = await this.usersService.findAll();
+        // กำหนดการใช้ type_id = 1
+        await Promise.all(users.map(user => 
+            this.notificationsService.create({
+                user_id: user.user_id,
+                title: `📅 กำหนดการใหม่: ${schedule.title}`,
+                message: schedule.description || 'มีรายการกำหนดการใหม่เพิ่มเข้ามาในปฏิทิน',
+                notification_type_id: 1, 
+                link_url: '/user/calendar'
+            })
+        ));
+    } catch (error) {
+        console.error('Error sending schedule notifications:', error);
+    }
+  }
+
+  async updateAllStatus(userId: number, isPublic: boolean) {
+    return await this.scheduleRepo.update(
+      { user_id: userId },
+      { is_public: isPublic },
+    );
   }
 
   /**

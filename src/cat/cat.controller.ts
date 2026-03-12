@@ -10,6 +10,7 @@ import {
 import { CATExamService } from './cat-exam.service';
 import { StartCATExamDto, SubmitCATAnswerDto } from './dto/cat-exam.dto';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
+import { Roles } from '../common/decorators/role.decorator';
 
 @Controller('cat')
 @UseGuards(JwtAuthGuard)
@@ -88,5 +89,43 @@ export class CATController {
     @Get('check-readiness/:item_bank_id')
     async checkCATReadiness(@Param('item_bank_id') itemBankId: string) {
         return this.catExamService.checkCATReadiness(+itemBankId);
+    }
+
+    // ==================== Admin endpoints ====================
+
+    /**
+     * [Admin] Session analytics overview
+     */
+    @Roles(2)
+    @Get('admin/analytics')
+    async getAdminAnalytics() {
+        return this.catExamService.getAdminAnalytics();
+    }
+
+    /**
+     * [Admin] Item exposure report across all sessions
+     */
+    @Roles(2)
+    @Get('admin/exposure')
+    async getExposureReport() {
+        return this.catExamService.getItemExposureReport();
+    }
+
+    /**
+     * [Admin] Test Information Function data for a specific item bank
+     */
+    @Roles(2)
+    @Get('admin/bank/:bank_id/tif')
+    async getBankTIF(@Param('bank_id') bankId: string) {
+        return this.catExamService.getBankTIF(+bankId);
+    }
+
+    /**
+     * [Admin] Trigger IRT calibration (calls irt_service)
+     */
+    @Roles(2)
+    @Post('admin/trigger-calibration')
+    async triggerCalibration(@Body() body: { bank_id?: number }) {
+        return this.catExamService.triggerCalibration(body.bank_id);
     }
 }

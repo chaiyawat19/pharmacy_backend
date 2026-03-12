@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Req, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Req, UseGuards, Query } from '@nestjs/common';
 import { ItemsBankService } from './items-bank.service';
 import { StartExamDto, SubmitExamDto } from './dto/exam.dto';
 import { ExamHistoryFilterDto } from './dto/exam-history-filter.dto';
@@ -31,6 +31,16 @@ export class ExamController {
     submitExam(@Req() req, @Param('sessionId') sessionId: string, @Body() submitExamDto: SubmitExamDto) {
         const userId = req.user.userId;
         return this.itemsBankService.submitExam(userId, +sessionId, submitExamDto);
+    }
+
+    /**
+     * Cancel exam session (ออกกลางคัน — ไม่บันทึกประวัติ)
+     * DELETE /items-bank/exam/:sessionId/cancel
+     */
+    @Delete('exam/:sessionId/cancel')
+    cancelExam(@Req() req, @Param('sessionId') sessionId: string) {
+        const userId = req.user.userId;
+        return this.itemsBankService.cancelExam(userId, +sessionId);
     }
 
     /**

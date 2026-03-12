@@ -23,6 +23,9 @@ export class CATSession {
     @Column({ type: 'float8', default: 0.0 })
     current_theta: number;
 
+    @Column({ type: 'float8', default: 0.0 })
+    prior_theta: number; // Bayesian prior mean — seeded from user's last session
+
     @Column({ type: 'float8', default: 999.0 })
     current_se: number;
 
