@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GoogleGenAI } from '@google/genai';
@@ -196,9 +196,5 @@ export class SchedulesService {
   async remove(id: number) {
     await this.scheduleRepo.delete(id);
     return { deleted: true };
-  }
-
-  async updateAllStatus(userId: number, isPublic: boolean) {
-    return await this.scheduleRepo.update({ user_id: userId }, { is_public: isPublic });
   }
 }
