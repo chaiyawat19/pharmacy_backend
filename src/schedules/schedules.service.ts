@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GoogleGenAI } from '@google/genai';
@@ -20,7 +24,9 @@ export class SchedulesService {
     private readonly usersService: UsersService,
   ) {
     // แนะนำ: ใช้ ConfigService ดึง API Key จาก .env
-    this.genAI = new GoogleGenerativeAI('AIzaSyCuvm1vI8Eun2vWXQb2BJmEJauQvI656Ds');
+    this.genAI = new GoogleGenerativeAI(
+      'AIzaSyDY193ogKLZtP9iYoUkTysUxV3-JSUIEA0',
+    );
   }
 
   /**
@@ -89,7 +95,7 @@ export class SchedulesService {
     const end = createScheduleDto.endDate ? new Date(createScheduleDto.endDate) : start;
 
     // 2. จัดการกลุ่มหลักสูตร (ถ้าส่งแยกมา ให้รวมเป็นก้อนเดียวตามกฎ)
-    let typeEvent = Array.isArray(createScheduleDto.type_event) 
+    let typeEvent = Array.isArray(createScheduleDto.type_event)
       ? createScheduleDto.type_event 
       : [];
 
