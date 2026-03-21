@@ -251,7 +251,7 @@ export class ItemsBankService {
     const updates = sorted_situation_ids.map((situation_id, index) => {
       return this.situationRepo.update(
         { item_bank_id: item_bank_id, situation_id: situation_id },
-        { display_order: index + 1 }
+        { display_order: index + 1 },
       );
     });
 
@@ -281,7 +281,7 @@ export class ItemsBankService {
       // 1. สร้าง Situation
       // นับจำนวนสถานการณ์ที่มีอยู่แล้วเพื่อกำหนด display_order
       const existingSituationsCount = await queryRunner.manager.count(ItemSituation, {
-        where: { item_bank_id }
+          where: { item_bank_id },
       });
 
       const situation = queryRunner.manager.create(ItemSituation, {
@@ -316,7 +316,7 @@ export class ItemsBankService {
 
         // 2.2 สร้างความสัมพันธ์ใน item_bank_items (ตรวจสอบว่ามีอยู่แล้วหรือไม่)
         const existingRelation = await queryRunner.manager.findOne(ItemBankItem, {
-          where: { item_bank_id, item_id: savedItem.item_id }
+            where: { item_bank_id, item_id: savedItem.item_id },
         });
 
         if (!existingRelation) {
@@ -482,7 +482,9 @@ export class ItemsBankService {
     });
 
     if (!bank) {
-      throw new NotFoundException(`Item bank with ID ${item_bank_id} not found`);
+      throw new NotFoundException(
+        `Item bank with ID ${item_bank_id} not found`,
+      );
     }
 
     // ดึงข้อมูลคำถามทั้งหมดในคลังข้อสอบ
@@ -886,7 +888,7 @@ export class ItemsBankService {
 
     const session = this.examSessionRepo.create({
       userId: userId,
-      itemBankId: item_bank_id
+      itemBankId: item_bank_id,
     });
 
     const savedSession = await this.examSessionRepo.save(session);
@@ -914,10 +916,17 @@ export class ItemsBankService {
     // ลบ session
     await this.examSessionRepo.delete({ session_id: sessionId });
 
-    return { message: 'ยกเลิกการสอบสำเร็จ — ไม่บันทึกประวัติ', cancelled: true };
+    return {
+      message: 'ยกเลิกการสอบสำเร็จ — ไม่บันทึกประวัติ',
+      cancelled: true,
+    };
   }
 
-  async submitExam(userId: number, sessionId: number, submitExamDto: SubmitExamDto) {
+  async submitExam(
+    userId: number,
+    sessionId: number,
+    submitExamDto: SubmitExamDto,
+  ) {
     // ตรวจสอบ session
     const session = await this.examSessionRepo.findOne({
       where: { session_id: sessionId, userId: userId }
@@ -929,7 +938,7 @@ export class ItemsBankService {
 
     const { answers } = submitExamDto;
     let correctCount = 0;
-    let totalQuestions = answers.length;
+    const totalQuestions = answers.length;
 
     // บันทึกคำตอบแต่ละข้อ
     for (let i = 0; i < answers.length; i++) {
@@ -979,8 +988,8 @@ export class ItemsBankService {
       { session_id: sessionId },
       {
         end_time: new Date(),
-        final_score: finalScore
-      }
+        final_score: finalScore,
+      },
     );
 
     return {
@@ -996,7 +1005,11 @@ export class ItemsBankService {
   /**
    * อัพเดทสถิติการตอบคำถามของผู้ใช้
    */
-  async updateUserItemMastery(userId: number, itemId: number, isCorrect: boolean) {
+  async updateUserItemMastery(
+    userId: number,
+    itemId: number,
+    isCorrect: boolean,
+  ) {
     // ตรวจสอบว่าเคยมีข้อมูลหรือยัง
     let mastery = await this.userItemMasteryRepo.findOne({
       where: { user_id: userId, item_id: itemId }
@@ -1056,7 +1069,22 @@ export class ItemsBankService {
     const correctCount = responses.filter(r => r.is_correct).length;
 
     // ดึงข้อมูล sub_topics สำหรับแต่ละคำถาม และวิเคราะห์ตามหัวข้อ
-    const topicStats = new Map<string, { topic_id: number, topic_name: string, sub_topics: Map<number, { sub_topic_id: number, sub_topic_name: string, correct: number, total: number }> }>();
+    const topicStats = new Map<
+      string,
+      {
+        topic_id: number;
+        topic_name: string;
+        sub_topics: Map<
+          number,
+          {
+            sub_topic_id: number;
+            sub_topic_name: string;
+            correct: number;
+            total: number;
+          }
+        >;
+      }
+    >();
 
     const responsesWithSubTopics = await Promise.all(
       responses.map(async (r) => {
@@ -1126,24 +1154,33 @@ export class ItemsBankService {
 
     // แปลง Map เป็น Array และคำนวณเปอร์เซ็นต์
     const topicAnalysis = Array.from(topicStats.values()).map(topic => {
-      const subTopicsArray = Array.from(topic.sub_topics.values()).map(st => ({
-        sub_topic_id: st.sub_topic_id,
-        sub_topic_name: st.sub_topic_name,
-        correct: st.correct,
-        total: st.total,
-        accuracy: st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0
-      }));
+        const subTopicsArray = Array.from(topic.sub_topics.values()).map(
+          (st) => ({
+            sub_topic_id: st.sub_topic_id,
+            sub_topic_name: st.sub_topic_name,
+            correct: st.correct,
+            total: st.total,
+            accuracy:
+              st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0,
+          }),
+        );
 
-      const topicCorrect = subTopicsArray.reduce((sum, st) => sum + st.correct, 0);
-      const topicTotal = subTopicsArray.reduce((sum, st) => sum + st.total, 0);
+        const topicCorrect = subTopicsArray.reduce(
+          (sum, st) => sum + st.correct,
+          0,
+        );
+        const topicTotal = subTopicsArray.reduce(
+          (sum, st) => sum + st.total,
+          0,
+        );
 
-      return {
-        topic_id: topic.topic_id,
+        return {
+          topic_id: topic.topic_id,
         topic_name: topic.topic_name,
         correct: topicCorrect,
         total: topicTotal,
         accuracy: topicTotal > 0 ? Math.round((topicCorrect / topicTotal) * 100) : 0,
-        sub_topics: subTopicsArray.sort((a, b) => a.accuracy - b.accuracy) // เรียงจุดอ่อนก่อน
+          sub_topics: subTopicsArray.sort((a, b) => a.accuracy - b.accuracy), // เรียงจุดอ่อนก่อน
       };
     }).sort((a, b) => a.accuracy - b.accuracy); // เรียงจุดอ่อนก่อน
 
@@ -1161,7 +1198,9 @@ export class ItemsBankService {
     };
   }
 
-  async getUserExamHistory(userId: number, filters?: {
+  async getUserExamHistory(
+    userId: number,
+    filters?: {
     category_ids?: number[];
     item_bank_id?: number;
     status?: 'ALL' | 'COMPLETED' | 'IN_PROGRESS';

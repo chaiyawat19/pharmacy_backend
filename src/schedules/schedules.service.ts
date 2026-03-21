@@ -28,10 +28,6 @@ export class SchedulesService {
       'AIzaSyDY193ogKLZtP9iYoUkTysUxV3-JSUIEA0',
     );
   }
-
-  /**
-   * AI Extraction: ดึงข้อมูลจาก PDF และจัดกลุ่มหลักสูตร
-   */
   async extractEventsFromPdf(file: Express.Multer.File) {
     try {
       const model = this.genAI.getGenerativeModel({
@@ -96,7 +92,7 @@ export class SchedulesService {
 
     // 2. จัดการกลุ่มหลักสูตร (ถ้าส่งแยกมา ให้รวมเป็นก้อนเดียวตามกฎ)
     let typeEvent = Array.isArray(createScheduleDto.type_event)
-      ? createScheduleDto.type_event 
+      ? createScheduleDto.type_event
       : [];
 
     const hasGroup1 = typeEvent.some(t => /PLE-IP1|PC1|PHCP1/.test(t));
@@ -117,14 +113,14 @@ export class SchedulesService {
       user_id: userId,
       is_public: createScheduleDto.is_public ?? true,
     });
-    
+
     const savedSchedule = await this.scheduleRepo.save(newSchedule);
 
     // แจ้งเตือนผู้ใช้ทุกคนเมื่อมีกำหนดการใหม่ (เฉพาะตัวที่เป็น Public)
     if (savedSchedule.is_public) {
-        this.notifyAllUsersNewSchedule(savedSchedule).catch(err => 
-            console.error('Failed to send schedule notifications:', err)
-        );
+      this.notifyAllUsersNewSchedule(savedSchedule).catch(err =>
+        console.error('Failed to send schedule notifications:', err)
+      );
     }
 
     return savedSchedule;
@@ -132,19 +128,31 @@ export class SchedulesService {
 
   private async notifyAllUsersNewSchedule(schedule: Schedule) {
     try {
-        const users = await this.usersService.findAll();
-        // กำหนดการใช้ type_id = 1
-        await Promise.all(users.map(user => 
-            this.notificationsService.create({
-                user_id: user.user_id,
-                title: `📅 กำหนดการใหม่: ${schedule.title}`,
-                message: schedule.description || 'มีรายการกำหนดการใหม่เพิ่มเข้ามาในปฏิทิน',
-                notification_type_id: 1, 
-                link_url: '/user/calendar'
-            })
-        ));
+      const users = await this.usersService.findAll();
+      console.log('Users found:', users.length); // ✅ เช็คว่าได้ users ไหม
+
+      const results = await Promise.allSettled(
+        users.map((user) =>
+        this.notificationsService.create({
+          user_id: user.user_id,
+          title: `📅 กำหนดการใหม่: ${schedule.title}`,
+            message:
+              schedule.description || 'มีรายการกำหนดการใหม่เพิ่มเข้ามาในปฏิทิน',
+            notification_type_id: 1,
+          link_url: '/user/calendar'
+        })
+      ));
+
+      // ✅ เช็คว่า notification ไหน fail
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed for user ${users[i].user_id}:`, result.reason);
+        } else {
+          console.log(`Notification saved for user ${users[i].user_id}`);
+        }
+      });
     } catch (error) {
-        console.error('Error sending schedule notifications:', error);
+      console.error('Error sending schedule notifications:', error);
     }
   }
 
@@ -170,7 +178,7 @@ export class SchedulesService {
       if (!isNaN(d.getTime())) updateData.start_time = d;
       delete updateData.startDate;
     }
-    
+
     if (dto.endDate) {
       const d = new Date(dto.endDate);
       if (!isNaN(d.getTime())) updateData.end_time = d;

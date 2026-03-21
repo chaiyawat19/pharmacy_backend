@@ -53,11 +53,4 @@ export class UsersController {
   }
 }
 
-@Controller('admin')
-export class AdminController {
-  @Roles(2) // 2 = admin
-  @Get('dashboard')
-  dashboard() {
-    return "Welcome to the admin dashboard!";
-  }
-}
+

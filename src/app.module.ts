@@ -24,6 +24,7 @@ import { NewsModule } from './news/news.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BookmarkModule } from './bookmark/bookmark.module';
 import { IrtModule } from './irt/irt.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 
 @Module({
@@ -60,6 +61,7 @@ import { IrtModule } from './irt/irt.module';
     NotificationsModule,
     BookmarkModule,
     IrtModule,
+    DashboardModule,
 
   ],
   controllers: [AppController],
