@@ -7,7 +7,7 @@ export class UserDashboardDto {
         last_exam_score: number
         improvement_rate: number
         days_until_exam: number
-        study_hours: number
+        study_minutes: number
     }
 
     ranking: {

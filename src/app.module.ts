@@ -18,7 +18,8 @@ import { TopicsModule } from './topics/topics.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CATModule } from './cat/cat.module';
 import { MailModule } from './mail/mail.module';
-import { SchedulesController } from './schedules/schedules.controller';
+import { UserDashboardModule } from './user-dashboard/user-dashboard.module'; // เพิ่ม import
+
 import { SchedulesModule } from './schedules/schedules.module';
 import { NewsModule } from './news/news.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -62,7 +63,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     BookmarkModule,
     IrtModule,
     DashboardModule,
-
+    UserDashboardModule,
   ],
   controllers: [AppController],
   providers: [

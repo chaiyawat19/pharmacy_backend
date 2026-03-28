@@ -129,7 +129,7 @@ export class SchedulesService {
   private async notifyAllUsersNewSchedule(schedule: Schedule) {
     try {
       const users = await this.usersService.findAll();
-      console.log('Users found:', users.length); // ✅ เช็คว่าได้ users ไหม
+      console.log('Users found:', users.length); 
 
       const results = await Promise.allSettled(
         users.map((user) =>

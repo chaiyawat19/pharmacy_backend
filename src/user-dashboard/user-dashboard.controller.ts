@@ -6,11 +6,11 @@ import express from 'express';
 @UseGuards(JwtAuthGuard)
 @Controller('user')
 export class UserDashboardController {
-    constructor(private readonly userDashboardService: UserDashboardService) {}
+    constructor(private readonly userDashboardService: UserDashboardService) { }
 
     @Get('dashboard')
     async getDashboard(@Req() req: express.Request) {
-        const userId = (req.user as any).id
+    const userId = (req.user as any).userId; // ← เปลี่ยนจาก .id เป็น .userId
     return this.userDashboardService.getUserDashboard(userId);
     }
 }
