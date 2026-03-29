@@ -397,7 +397,7 @@ export class ItemsBankService {
     const updates = sorted_situation_ids.map((situation_id, index) => {
       return this.situationRepo.update(
         { item_bank_id: item_bank_id, situation_id: situation_id },
-        { display_order: index + 1 }
+        { display_order: index + 1 },
       );
     });
 
@@ -427,7 +427,7 @@ export class ItemsBankService {
       // 1. สร้าง Situation
       // นับจำนวนสถานการณ์ที่มีอยู่แล้วเพื่อกำหนด display_order
       const existingSituationsCount = await queryRunner.manager.count(ItemSituation, {
-        where: { item_bank_id }
+          where: { item_bank_id },
       });
 
       const situation = queryRunner.manager.create(ItemSituation, {
@@ -462,7 +462,7 @@ export class ItemsBankService {
 
         // 2.2 สร้างความสัมพันธ์ใน item_bank_items (ตรวจสอบว่ามีอยู่แล้วหรือไม่)
         const existingRelation = await queryRunner.manager.findOne(ItemBankItem, {
-          where: { item_bank_id, item_id: savedItem.item_id }
+            where: { item_bank_id, item_id: savedItem.item_id },
         });
 
         if (!existingRelation) {
@@ -628,7 +628,9 @@ export class ItemsBankService {
     });
 
     if (!bank) {
-      throw new NotFoundException(`Item bank with ID ${item_bank_id} not found`);
+      throw new NotFoundException(
+        `Item bank with ID ${item_bank_id} not found`,
+      );
     }
 
     // ดึงข้อมูลคำถามทั้งหมดในคลังข้อสอบ
@@ -1063,7 +1065,10 @@ export class ItemsBankService {
     // ลบ session (responses อยู่ใน JSONB แล้ว ไม่ต้อง delete แยก)
     await this.examSessionRepo.delete({ session_id: sessionId });
 
-    return { message: 'ยกเลิกการสอบสำเร็จ — ไม่บันทึกประวัติ', cancelled: true };
+    return {
+      message: 'ยกเลิกการสอบสำเร็จ — ไม่บันทึกประวัติ',
+      cancelled: true,
+    };
   }
 
   async submitExam(userId: number, sessionId: number, submitExamDto: SubmitExamDto) {
@@ -1141,7 +1146,11 @@ export class ItemsBankService {
   /**
    * อัพเดทสถิติการตอบคำถามของผู้ใช้
    */
-  async updateUserItemMastery(userId: number, itemId: number, isCorrect: boolean) {
+  async updateUserItemMastery(
+    userId: number,
+    itemId: number,
+    isCorrect: boolean,
+  ) {
     // ตรวจสอบว่าเคยมีข้อมูลหรือยัง
     let mastery = await this.userItemMasteryRepo.findOne({
       where: { user_id: userId, item_id: itemId }
@@ -1302,7 +1311,9 @@ export class ItemsBankService {
     };
   }
 
-  async getUserExamHistory(userId: number, filters?: {
+  async getUserExamHistory(
+    userId: number,
+    filters?: {
     category_ids?: number[];
     item_bank_id?: number;
     status?: 'ALL' | 'COMPLETED' | 'IN_PROGRESS';

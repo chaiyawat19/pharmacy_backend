@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GoogleGenAI } from '@google/genai';
@@ -7,10 +11,11 @@ import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 @Injectable()
 export class SchedulesService {
-  private ai: GoogleGenAI;
+  private genAI: GoogleGenerativeAI;
 
   constructor(
     @InjectRepository(Schedule)
@@ -22,58 +27,99 @@ export class SchedulesService {
       apiKey: process.env.GEMINI_API_KEY,
     });
   }
-
   async extractEventsFromPdf(file: Express.Multer.File) {
     try {
-      const response = await this.ai.models.generateContent({
+      const model = this.genAI.getGenerativeModel({
         model: 'gemini-3-flash-preview',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: "ดึงข้อมูลกำหนดการจาก PDF นี้เป็น JSON Array: [{'title': '...', 'description': '...', 'startDate': 'YYYY-MM-DD', 'endDate': 'YYYY-MM-DD'}] ตอบเฉพาะ JSON เท่านั้น",
-              },
-              {
-                inlineData: {
-                  data: file.buffer.toString('base64'),
-                  mimeType: 'application/pdf',
-                },
-              },
-            ],
-          },
-        ],
       });
 
-      const responseText = response.text || '';
+      const prompt = `ดึงข้อมูลกำหนดการจาก PDF นี้และตอบกลับเป็น JSON Array เท่านั้น
+      ห้ามอธิบายเพิ่มเติม ห้ามใส่ Markdown
+      
+      เงื่อนไขสำคัญสำหรับ type_event:
+      - ถ้าเนื้อหาเกี่ยวข้องกับ PLE-IP1 หรือ PC1 หรือ PHCP1 ให้บันทึกค่าใน Array เป็น "PLE-IP1, PC1, PHCP1" (ก้อนเดียว)
+      - หลักสูตรอื่นๆ ให้ระบุแยกตามปกติ
+      
+      โครงสร้าง JSON: [{ "title": "...", "description": "...", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "type_event": ["PLE-IP1, PC1, PHCP1"] }]`;
 
-      if (!responseText) {
-        throw new Error('AI ไม่สามารถดึงข้อมูลจากไฟล์นี้ได้');
-      }
+      const result = await model.generateContent([
+        { text: prompt },
+        {
+          inlineData: {
+            data: file.buffer.toString('base64'),
+            mimeType: 'application/pdf',
+          },
+        },
+      ]);
 
-      const text = responseText.replace(/```json|```/g, '').trim();
-      return JSON.parse(text);
+      const response = await result.response;
+      const responseText = response.text();
+
+      if (!responseText) throw new Error('AI ไม่สามารถดึงข้อมูลได้');
+
+      const cleanJson = responseText.replace(/```json|```/g, '').trim();
+      const extractedData = JSON.parse(cleanJson);
+
+      // ตรวจสอบและ Re-format ข้อมูลเผื่อ AI พลาด
+      return extractedData.map((event: any) => {
+        const types: string[] = event.type_event || [];
+        const hasGroup1 = types.some(t => /PLE-IP1|PC1|PHCP1/.test(t));
+
+        if (hasGroup1) {
+          const others = types.filter(t => !/PLE-IP1|PC1|PHCP1/.test(t));
+          event.type_event = ["PLE-IP1, PC1, PHCP1", ...others];
+        }
+        return event;
+      });
+
     } catch (error: any) {
-      throw new Error('เกิดข้อผิดพลาด: ' + error.message);
+      console.error('AI Extraction Error:', error);
+      throw new BadRequestException('การดึงข้อมูลผิดพลาด: ' + error.message);
     }
   }
 
   async create(createScheduleDto: CreateScheduleDto, userId: number) {
-    if (!userId) {
-      throw new UnauthorizedException('ไม่พบข้อมูลผู้ใช้งาน กรุณา Login ใหม่');
+    if (!userId) throw new UnauthorizedException('กรุณา Login ใหม่');
+
+    // 1. ตรวจสอบวันที่ (ป้องกัน NaN/Invalid Date)
+    const start = new Date(createScheduleDto.startDate);
+    if (isNaN(start.getTime())) {
+      throw new BadRequestException(`วันที่เริ่มต้นไม่ถูกต้อง: ${createScheduleDto.startDate}`);
     }
+
+    const end = createScheduleDto.endDate ? new Date(createScheduleDto.endDate) : start;
+
+    // 2. จัดการกลุ่มหลักสูตร (ถ้าส่งแยกมา ให้รวมเป็นก้อนเดียวตามกฎ)
+    let typeEvent = Array.isArray(createScheduleDto.type_event)
+      ? createScheduleDto.type_event
+      : [];
+
+    const hasGroup1 = typeEvent.some(t => /PLE-IP1|PC1|PHCP1/.test(t));
+    if (hasGroup1) {
+      const others = typeEvent.filter(t => !/PLE-IP1|PC1|PHCP1/.test(t));
+      // เช็คว่ามีก้อนที่เป็นคอมม่าอยู่แล้วหรือยัง ถ้าไม่มีให้เพิ่มเข้าชุด
+      if (!typeEvent.includes("PLE-IP1, PC1, PHCP1")) {
+        typeEvent = ["PLE-IP1, PC1, PHCP1", ...others];
+      }
+    }
+
     const newSchedule = this.scheduleRepo.create({
-      ...createScheduleDto,
-      user_id: userId
+      title: createScheduleDto.title,
+      description: createScheduleDto.description,
+      start_time: start,
+      end_time: end,
+      type_event: typeEvent,
+      user_id: userId,
+      is_public: createScheduleDto.is_public ?? true,
     });
-    
+
     const savedSchedule = await this.scheduleRepo.save(newSchedule);
 
     // แจ้งเตือนผู้ใช้ทุกคนเมื่อมีกำหนดการใหม่ (เฉพาะตัวที่เป็น Public)
     if (savedSchedule.is_public) {
-        this.notifyAllUsersNewSchedule(savedSchedule).catch(err => 
-            console.error('Failed to send schedule notifications:', err)
-        );
+      this.notifyAllUsersNewSchedule(savedSchedule).catch(err =>
+        console.error('Failed to send schedule notifications:', err)
+      );
     }
 
     return savedSchedule;
@@ -81,19 +127,31 @@ export class SchedulesService {
 
   private async notifyAllUsersNewSchedule(schedule: Schedule) {
     try {
-        const users = await this.usersService.findAll();
-        // กำหนดการใช้ type_id = 1
-        await Promise.all(users.map(user => 
-            this.notificationsService.create({
-                user_id: user.user_id,
-                title: `📅 กำหนดการใหม่: ${schedule.title}`,
-                message: schedule.description || 'มีรายการกำหนดการใหม่เพิ่มเข้ามาในปฏิทิน',
-                notification_type_id: 1, 
-                link_url: '/user/calendar'
-            })
-        ));
+      const users = await this.usersService.findAll();
+      console.log('Users found:', users.length); 
+
+      const results = await Promise.allSettled(
+        users.map((user) =>
+        this.notificationsService.create({
+          user_id: user.user_id,
+          title: `📅 กำหนดการใหม่: ${schedule.title}`,
+            message:
+              schedule.description || 'มีรายการกำหนดการใหม่เพิ่มเข้ามาในปฏิทิน',
+            notification_type_id: 1,
+          link_url: '/user/calendar'
+        })
+      ));
+
+      // ✅ เช็คว่า notification ไหน fail
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed for user ${users[i].user_id}:`, result.reason);
+        } else {
+          console.log(`Notification saved for user ${users[i].user_id}`);
+        }
+      });
     } catch (error) {
-        console.error('Error sending schedule notifications:', error);
+      console.error('Error sending schedule notifications:', error);
     }
   }
 
@@ -104,25 +162,52 @@ export class SchedulesService {
     );
   }
 
-  findAll() {
-    return this.scheduleRepo.find();
-  }
-  findOne(id: number) {
-    return this.scheduleRepo.findOneBy({ id });
-  }
+  /**
+   * Update: แก้ไขข้อมูล
+   */
   async update(id: number, dto: UpdateScheduleDto) {
-    await this.scheduleRepo.update(id, dto);
+    const existing = await this.findOne(id);
+    if (!existing) throw new BadRequestException('ไม่พบข้อมูลที่ต้องการแก้ไข');
+
+    const updateData: any = { ...dto };
+
+    // จัดการวันที่
+    if (dto.startDate) {
+      const d = new Date(dto.startDate);
+      if (!isNaN(d.getTime())) updateData.start_time = d;
+      delete updateData.startDate;
+    }
+
+    if (dto.endDate) {
+      const d = new Date(dto.endDate);
+      if (!isNaN(d.getTime())) updateData.end_time = d;
+      delete updateData.endDate;
+    }
+
+    // จัดการกลุ่มหลักสูตรกรณีมีการแก้ไข type_event
+    if (dto.type_event && Array.isArray(dto.type_event)) {
+      const hasGroup1 = dto.type_event.some(t => /PLE-IP1|PC1|PHCP1/.test(t));
+      if (hasGroup1) {
+        const others = dto.type_event.filter(t => !/PLE-IP1|PC1|PHCP1/.test(t));
+        updateData.type_event = ["PLE-IP1, PC1, PHCP1", ...others];
+      }
+    }
+
+    await this.scheduleRepo.update(id, updateData);
     return this.findOne(id);
   }
+
+  // --- Helpers ---
+  async findAll() {
+    return await this.scheduleRepo.find({ order: { start_time: 'ASC' } });
+  }
+
+  async findOne(id: number) {
+    return await this.scheduleRepo.findOneBy({ id });
+  }
+
   async remove(id: number) {
     await this.scheduleRepo.delete(id);
     return { deleted: true };
-  }
-
-  async removeAll(userId: number) {
-    if (!userId) {
-      throw new UnauthorizedException('ไม่พบข้อมูลผู้ใช้งาน');
-    }
-    return await this.scheduleRepo.delete({ user_id: userId });
   }
 }
