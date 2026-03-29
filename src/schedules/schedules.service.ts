@@ -23,9 +23,10 @@ export class SchedulesService {
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
   ) {
-    this.ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-    });
+    // แนะนำ: ใช้ ConfigService ดึง API Key จาก .env
+    this.genAI = new GoogleGenerativeAI(
+      'AIzaSyDY193ogKLZtP9iYoUkTysUxV3-JSUIEA0',
+    );
   }
   async extractEventsFromPdf(file: Express.Multer.File) {
     try {
