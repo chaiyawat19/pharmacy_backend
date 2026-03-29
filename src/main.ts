@@ -16,6 +16,7 @@ class CustomIoAdapter extends IoAdapter {
         origin: [
           'https://phamacyexam-frontend-fork-production.up.railway.app',
           'http://localhost:3000',
+          'http://localhost:8080',
         ],
         credentials: true,
       },
@@ -31,6 +32,7 @@ async function bootstrap() {
     origin: [
       'https://phamacyexam-frontend-fork-production.up.railway.app',
       'http://localhost:3000',
+      'http://localhost:8080',
     ],
     credentials: true,
   });

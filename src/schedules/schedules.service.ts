@@ -23,7 +23,6 @@ export class SchedulesService {
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
   ) {
-    // แนะนำ: ใช้ ConfigService ดึง API Key จาก .env
     this.genAI = new GoogleGenerativeAI(
       'AIzaSyDY193ogKLZtP9iYoUkTysUxV3-JSUIEA0',
     );
@@ -31,7 +30,7 @@ export class SchedulesService {
   async extractEventsFromPdf(file: Express.Multer.File) {
     try {
       const model = this.genAI.getGenerativeModel({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.5-flash',
       });
 
       const prompt = `ดึงข้อมูลกำหนดการจาก PDF นี้และตอบกลับเป็น JSON Array เท่านั้น

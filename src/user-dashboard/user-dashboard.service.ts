@@ -4,7 +4,6 @@ import { Repository } from 'typeorm';
 
 import { User } from '../users/entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
-import { ExamResponse } from '../items-bank/entities/exam-response.entity';
 import { UserDashboardDto } from './dto/user-dashboard.dto';
 
 const EXAM_DATE = new Date('2026-06-01'); // วันสอบจริง — ปรับได้
@@ -19,8 +18,6 @@ export class UserDashboardService {
     @InjectRepository(ExamSession)
     private sessionRepo: Repository<ExamSession>,
 
-    @InjectRepository(ExamResponse)
-    private responseRepo: Repository<ExamResponse>,
   ) {}
 
   async getUserDashboard(userId: number): Promise<UserDashboardDto> {
@@ -169,30 +166,38 @@ export class UserDashboardService {
 
   // ── 3. Radar chart — % ถูกต้องแยกตาม Topic (หมวดใหญ่) ──────────────────
   //
-  // Chain: ExamResponse → Item → ItemSubTopic → SubTopic → Topic
-  // วัดจาก is_correct จริง ไม่ใช่ final_score
+  // ดึง item_id + is_correct จาก JSONB responses ใน ExamSession
+  // แล้ว join ผ่าน item_sub_topics → sub_topics → topics
   //
   private async getRadarData(userId: number) {
-    const raw = await this.responseRepo
-      .createQueryBuilder('r')
-      .innerJoin('r.session', 's')
-      .innerJoin('r.item', 'item')
-      .innerJoin('item.item_sub_topics', 'ist')
-      .innerJoin('ist.sub_topic', 'st')
-      .innerJoin('st.topic', 'topic')
-      .select('topic.topic_id', 'topic_id')
-      .addSelect('topic.topic_name', 'subject')
-      .addSelect('COUNT(r.response_id)', 'total')
-      .addSelect(
-        'SUM(CASE WHEN r.is_correct = true THEN 1 ELSE 0 END)',
-        'correct',
-      )
-      .where('s.user_id = :userId', { userId })
-      .andWhere('s.end_time IS NOT NULL')
-      .groupBy('topic.topic_id')
-      .addGroupBy('topic.topic_name')
-      .orderBy('topic.topic_name', 'ASC')
-      .getRawMany();
+    const raw: { topic_id: number; subject: string; total: string; correct: string }[] =
+      await this.sessionRepo.manager.query(
+        `
+        WITH resp AS (
+          SELECT
+            (r->>'item_id')::int   AS item_id,
+            (r->>'is_correct')::bool AS is_correct
+          FROM exam_sessions s,
+               jsonb_array_elements(s.responses) AS r
+          WHERE s.user_id      = $1
+            AND s.end_time     IS NOT NULL
+            AND s.responses    IS NOT NULL
+            AND jsonb_array_length(s.responses) > 0
+        )
+        SELECT
+          t.topic_id,
+          t.topic_name                                      AS subject,
+          COUNT(resp.item_id)::text                         AS total,
+          SUM(CASE WHEN resp.is_correct THEN 1 ELSE 0 END)::text AS correct
+        FROM resp
+        JOIN item_sub_topics ist ON ist.item_id   = resp.item_id
+        JOIN sub_topics      st  ON st.sub_topic_id = ist.sub_topic_id
+        JOIN topics          t   ON t.topic_id     = st.topic_id
+        GROUP BY t.topic_id, t.topic_name
+        ORDER BY t.topic_name ASC
+        `,
+        [userId],
+      );
 
     return raw.map((r) => {
       const total = Number(r.total) || 0;
@@ -207,31 +212,41 @@ export class UserDashboardService {
   }
 
   // ── 4. Weak topics — % ถูกต้องแยกตาม SubTopic เรียงจากน้อยไปมาก ─────────
-  // Chain: ExamResponse → Item → ItemSubTopic → SubTopic → Topic
+  // ดึง item_id + is_correct จาก JSONB responses ของ session
   private async getWeakTopics(userId: number) {
-    const raw = await this.responseRepo
-      .createQueryBuilder('r')
-      .innerJoin('r.session', 's')
-      .innerJoin('r.item', 'item')
-      .innerJoin('item.item_sub_topics', 'ist')
-      .innerJoin('ist.sub_topic', 'st')
-      .innerJoin('st.topic', 'topic')
-      .select('topic.topic_name', 'subject') // หมวดใหญ่
-      .addSelect('st.sub_topic_name', 'topic') // หัวข้อย่อย
-      .addSelect('COUNT(r.response_id)', 'total')
-      .addSelect(
-        'SUM(CASE WHEN r.is_correct = true THEN 1 ELSE 0 END)',
-        'correct',
+    const raw: {
+      subject: string;
+      topic: string;
+      total: string;
+      correct: string;
+    }[] = await this.sessionRepo.manager.query(
+      `
+      WITH resp AS (
+        SELECT
+          (r->>'item_id')::int    AS item_id,
+          (r->>'is_correct')::bool AS is_correct
+        FROM exam_sessions s,
+             jsonb_array_elements(s.responses) AS r
+        WHERE s.user_id   = $1
+          AND s.end_time  IS NOT NULL
+          AND s.responses IS NOT NULL
+          AND jsonb_array_length(s.responses) > 0
       )
-      .where('s.user_id = :userId', { userId })
-      .andWhere('s.end_time IS NOT NULL')
-      .groupBy('topic.topic_name')
-      .addGroupBy('st.sub_topic_id')
-      .addGroupBy('st.sub_topic_name')
-      .having('COUNT(r.response_id) >= 3') // ต้องตอบอย่างน้อย 3 ข้อ
-      .getRawMany(); // sort ใน JS แทน — PostgreSQL ไม่รองรับ ORDER BY alias
+      SELECT
+        t.topic_name                                        AS subject,
+        st.sub_topic_name                                   AS topic,
+        COUNT(resp.item_id)::text                           AS total,
+        SUM(CASE WHEN resp.is_correct THEN 1 ELSE 0 END)::text AS correct
+      FROM resp
+      JOIN item_sub_topics ist ON ist.item_id     = resp.item_id
+      JOIN sub_topics      st  ON st.sub_topic_id = ist.sub_topic_id
+      JOIN topics          t   ON t.topic_id      = st.topic_id
+      GROUP BY t.topic_name, st.sub_topic_id, st.sub_topic_name
+      HAVING COUNT(resp.item_id) >= 3
+      `,
+      [userId],
+    );
 
-    // NOTE: orderBy alias 'score' ใช้ไม่ได้ใน postgres — sort ใน JS แทน
     const mapped = raw.map((r) => {
       const total = Number(r.total) || 0;
       const correct = Number(r.correct) || 0;
@@ -246,7 +261,6 @@ export class UserDashboardService {
       };
     });
 
-    // เรียงคะแนนต่ำ → สูง แล้วเอา 10 อันดับแรก
     return mapped.sort((a, b) => a.score - b.score).slice(0, 10);
   }
 

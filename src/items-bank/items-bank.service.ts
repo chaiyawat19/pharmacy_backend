@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CreateItemsBankDto } from './dto/create-items-bank.dto';
@@ -1082,6 +1082,9 @@ export class ItemsBankService {
     }
     if (session.userId !== userId) {
       throw new UnauthorizedException(`คุณไม่มีสิทธิ์เข้าถึง session ID ${sessionId}`);
+    }
+    if (session.end_time) {
+      throw new BadRequestException('ข้อสอบชุดนี้ถูกส่งไปแล้ว ไม่สามารถส่งซ้ำได้');
     }
 
     const { answers } = submitExamDto;
