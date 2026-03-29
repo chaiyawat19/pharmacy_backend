@@ -1,21 +1,26 @@
 import {
     Entity,
     Column,
-    PrimaryGeneratedColumn,
+    PrimaryColumn,
+    OneToOne,
+    JoinColumn,
     CreateDateColumn,
     UpdateDateColumn,
 } from 'typeorm';
+import { ExamSession } from '../../items-bank/entities/exam-session.entity';
 
 @Entity('cat_sessions')
 export class CATSession {
-    @PrimaryGeneratedColumn()
+    // session_id เป็น serial4 ใน DB แต่เราตั้งค่าเองจาก exam_sessions.session_id
+    @PrimaryColumn({ type: 'int' })
     session_id: number;
 
-    @Column({ type: 'integer' })
-    user_id: number;
+    @Column({ name: 'user_id', type: 'int' })
+    userId: number;
 
-    @Column({ type: 'integer', nullable: true })
-    item_bank_id: number;
+    @OneToOne(() => ExamSession)
+    @JoinColumn({ name: 'session_id' })
+    base_session: ExamSession;
 
     @Column({ type: 'jsonb', nullable: true })
     topic_proportions: any; // { topic_id: weight_percentage }
@@ -34,9 +39,6 @@ export class CATSession {
 
     @Column({ type: 'integer', default: 0 })
     num_correct: number;
-
-    @Column({ type: 'varchar', length: 50, default: 'IN_PROGRESS' })
-    status: string; // 'IN_PROGRESS', 'COMPLETED'
 
     @Column({ type: 'jsonb', nullable: true })
     used_item_ids: number[]; // เก็บ item_id ที่ใช้ไปแล้ว
@@ -71,15 +73,12 @@ export class CATSession {
     @Column({ type: 'float8', default: 0.0 })
     cut_score: number;
 
-    @Column({ type: 'varchar', length: 50, nullable: true })
-    mode: string; // 'real' | 'demo-easy' | 'demo-medium' | 'demo-hard'
-
-    @CreateDateColumn({ type: 'timestamp with time zone' })
+    @CreateDateColumn({ type: 'timestamptz' })
     start_time: Date;
 
-    @UpdateDateColumn({ type: 'timestamp with time zone' })
+    @UpdateDateColumn({ type: 'timestamptz' })
     updated_at: Date;
 
-    @Column({ type: 'timestamp with time zone', nullable: true })
+    @Column({ type: 'timestamptz', nullable: true })
     end_time: Date;
 }

@@ -14,9 +14,12 @@ import { Topic } from '../topics/entities/topic.entity';
 
 import { NotificationsModule } from '../notifications/notifications.module';
 
+import { ExamSession } from '../items-bank/entities/exam-session.entity';
+
 @Module({
     imports: [
         TypeOrmModule.forFeature([
+            ExamSession,
             CATSession,
             ItemsBank,
             ItemBankItem,

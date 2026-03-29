@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Req, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Req, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ItemsBankService } from './items-bank.service';
 import { CreateItemsBankDto } from './dto/create-items-bank.dto';
 import { CreateSituationDto } from './dto/create-situation.dto';
@@ -117,6 +118,16 @@ export class ItemsBankController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.itemsBankService.remove(+id);
+  }
+
+  @Post(':id/upload-pdf')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadPdf(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    console.log(`Uploading PDF for bank ${id}:`, file?.originalname, 'Size:', file?.size);
+    return this.itemsBankService.addQuestionsFromPdf(+id, file);
   }
 
   // ==================== CAT Management Endpoints ====================

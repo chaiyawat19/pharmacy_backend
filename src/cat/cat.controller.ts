@@ -3,6 +3,7 @@ import {
     Post,
     Body,
     Get,
+    Delete,
     Param,
     UseGuards,
     Request,
@@ -72,6 +73,15 @@ export class CATController {
     async getExamHistory(@Request() req) {
         const userId = req.user.userId;
         return this.catExamService.getUserCATHistory(userId);
+    }
+
+    /**
+     * ยกเลิก CAT session ออกกลางคัน (รีเฟรช / ไปหน้าอื่น) — ไม่บันทึกประวัติ
+     */
+    @Delete('session/:session_id/cancel')
+    async cancelSession(@Request() req, @Param('session_id') sessionId: string) {
+        const userId = req.user.userId;
+        return this.catExamService.cancelCATSession(userId, +sessionId);
     }
 
     /**

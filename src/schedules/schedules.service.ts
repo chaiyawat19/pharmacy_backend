@@ -19,7 +19,7 @@ export class SchedulesService {
     private readonly usersService: UsersService,
   ) {
     this.ai = new GoogleGenAI({
-      apiKey: 'AIzaSyCuvm1vI8Eun2vWXQb2BJmEJauQvI656Ds',
+      apiKey: process.env.GEMINI_API_KEY,
     });
   }
 

@@ -22,10 +22,10 @@ export class ItemSituation {
     @JoinColumn({ name: 'item_bank_id' })
     item_bank: ItemsBank;
 
-    @Column({ type: 'varchar', length: 255 })
+    @Column({ type: 'text' })
     situation_text: string;
 
-    @Column({ type: 'varchar', length: 255 })
+    @Column({ type: 'text' })
     situation_image_url: string;
 
     @Column({ type: 'integer', default: 1 })

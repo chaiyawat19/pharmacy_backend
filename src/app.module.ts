@@ -39,7 +39,7 @@ import { IrtModule } from './irt/irt.module';
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_DATABASE'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: false, // ⚠️ ชั่วคราว! เปลี่ยนกลับเป็น false หลังสร้างตารางเสร็จ
+        synchronize: false, // ⚠️ ปิดไว้ก่อนเพราะติด Constraint ของ universities
         autoLoadEntities: true,
       }),
       inject: [ConfigService],

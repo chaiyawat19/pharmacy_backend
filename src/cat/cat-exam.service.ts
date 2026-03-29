@@ -11,12 +11,14 @@ import { Item } from '../items-bank/entities/items.entity';
 import { AnswerOption } from '../items-bank/entities/answer_options.entity';
 import { ItemSubTopic } from '../items-bank/entities/item_sub_topics.entity';
 import { Topic } from '../topics/entities/topic.entity';
-
+import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class CATExamService {
     constructor(
+        @InjectRepository(ExamSession)
+        private readonly sessionRepo: Repository<ExamSession>,
         @InjectRepository(CATSession)
         private readonly catSessionRepo: Repository<CATSession>,
         @InjectRepository(ItemsBank)
@@ -40,22 +42,8 @@ export class CATExamService {
      * เริ่มการสอบ CAT
      */
     async startCATExam(userId: number, startExamDto: StartCATExamDto) {
-        const { item_bank_id, min_items, max_items, target_se, cut_score, mode, initial_theta, topic_proportions } =
+        const { min_items, max_items, target_se, cut_score, initial_theta, topic_proportions } =
             startExamDto;
-
-        if (item_bank_id) {
-            // ตรวจสอบว่า item bank มีอยู่จริง
-            const itemBank = await this.itemsBankRepo.findOne({
-                where: { item_bank_id },
-            });
-            if (!itemBank) {
-                throw new NotFoundException(`ไม่พบคลังข้อสอบ ID ${item_bank_id}`);
-            }
-
-            // ตรวจสอบว่า item bank พร้อมสำหรับ CAT (มีข้อสอบที่มี IRT parameters ครบ)
-            const minItemsRequired = min_items || 20;
-            await this.validateItemBankForCAT(item_bank_id, minItemsRequired);
-        }
 
         // ดึงค่า theta จาก session ก่อนหน้าของ user เพื่อใช้เป็น Bayesian prior
         // (ถ้า user ระบุ initial_theta มาด้วยตัวเองก็ใช้ตามนั้น)
@@ -65,57 +53,64 @@ export class CATExamService {
             priorTheta = lastAbility.has_history ? lastAbility.theta : 0.0;
         }
 
-        // สร้าง CAT session ใหม่
-        const session = this.catSessionRepo.create({
-            user_id: userId,
-            item_bank_id: item_bank_id,
+        // 1. สร้าง Session ตัวหลัก (Base)
+        // CAT ดึงจาก global pool เสมอ → itemBankId = null เสมอ
+        const baseSession = this.sessionRepo.create({
+            userId: userId,
+            itemBankId: null,
+            session_type: 'CAT',
+            start_time: new Date(),
+        });
+        const savedBase = await this.sessionRepo.save(baseSession);
+
+        // 2. สร้าง CAT session เฉพาะทาง (Detail)
+        const catSessionData = this.catSessionRepo.create({
+            session_id: Number(savedBase.session_id),
+            userId: userId,
             current_theta: priorTheta,
-            prior_theta: priorTheta,      // เก็บ prior ไว้ใช้ตลอด session
+            prior_theta: priorTheta,
             current_se: 999.0,
             num_items: 0,
             num_correct: 0,
-            status: 'IN_PROGRESS',
             used_item_ids: [],
             responses: [],
             min_items: min_items || 20,
             max_items: max_items || 50,
             target_se: target_se || 0.35,
             cut_score: cut_score || 0.0,
-            mode: mode || 'real',
             topic_proportions: topic_proportions || null,
         });
 
-        const savedSession = await this.catSessionRepo.save(session);
+        const savedCATSession = await this.catSessionRepo.save(catSessionData);
 
-        // เลือกข้อแรก
-        const firstItem = await this.selectFirstItemForSession(savedSession);
+        // เลือกข้อแรกจาก global pool (ไม่ filter ตาม item bank)
+        const firstItem = await this.selectFirstItemForSession(savedCATSession);
 
         if (!firstItem) {
-            throw new NotFoundException('ไม่มีข้อสอบในคลัง');
+            throw new NotFoundException('ไม่มีข้อสอบในระบบที่มี IRT parameters ครบ');
         }
 
         // อัพเดท session ด้วยข้อแรก
-        savedSession.current_item_id = firstItem.item_id;
-        savedSession.used_item_ids = [firstItem.item_id];
-        await this.catSessionRepo.save(savedSession);
+        savedCATSession.current_item_id = firstItem.item_id;
+        savedCATSession.used_item_ids = [firstItem.item_id];
+        await this.catSessionRepo.save(savedCATSession);
 
         return {
             message: 'เริ่มการสอบ CAT สำเร็จ',
-            session_id: savedSession.session_id,
-            item_bank_id: savedSession.item_bank_id,
+            session_id: Number(savedBase.session_id),
             current_item: firstItem,
-            current_theta: savedSession.current_theta,
-            current_se: savedSession.current_se,
-            num_items: savedSession.num_items,
-            start_time: savedSession.start_time,
+            current_theta: savedCATSession.current_theta,
+            current_se: savedCATSession.current_se,
+            num_items: savedCATSession.num_items,
+            start_time: savedBase.start_time,
         };
     }
 
     /**
      * เลือกข้อแรกสำหรับ session
      */
-    private async selectFirstItemForSession(session: CATSession) {
-        const itemBank = await this.getAvailableItemsWithTopics(session.item_bank_id);
+    private async selectFirstItemForSession(session: CATSession, itemBankId?: number) {
+        const itemBank = await this.getAvailableItemsWithTopics(itemBankId);
 
         if (session.topic_proportions) {
             const targetTopicId = this.selectNextTopicId(session, [], itemBank);
@@ -311,14 +306,15 @@ export class CATExamService {
      */
     async getNextItem(userId: number, sessionId: number) {
         const session = await this.catSessionRepo.findOne({
-            where: { session_id: sessionId, user_id: userId },
+            where: { session_id: sessionId },
+            relations: ['base_session'],
         });
 
-        if (!session) {
+        if (!session || session.base_session.userId !== userId) {
             throw new NotFoundException(`ไม่พบ session ID ${sessionId}`);
         }
 
-        if (session.status !== 'IN_PROGRESS') {
+        if (session.base_session.end_time) {
             throw new NotFoundException('Session นี้จบแล้ว');
         }
 
@@ -359,14 +355,15 @@ export class CATExamService {
             submitAnswerDto;
 
         const session = await this.catSessionRepo.findOne({
-            where: { session_id, user_id: userId },
+            where: { session_id },
+            relations: ['base_session'],
         });
 
-        if (!session) {
+        if (!session || session.base_session.userId !== userId) {
             throw new NotFoundException(`ไม่พบ session ID ${session_id}`);
         }
 
-        if (session.status !== 'IN_PROGRESS') {
+        if (session.base_session.end_time) {
             throw new NotFoundException('Session นี้จบแล้ว');
         }
 
@@ -452,8 +449,12 @@ export class CATExamService {
 
         if (stoppingRule.shouldStop) {
             // จบการสอบ
-            session.status = 'COMPLETED';
-            session.end_time = new Date();
+
+            const now = new Date();
+            // อัพเดทเวลาจบที่ฐานหลัก
+            await this.sessionRepo.update(session.session_id, {
+                end_time: now,
+            });
             session.final_theta = session.current_theta;
             session.final_se = session.current_se;
             session.passed = this.catService.makeDecision(
@@ -468,7 +469,7 @@ export class CATExamService {
             // แจ้งเตือนเมื่อสอบเสร็จ
             try {
                 await this.notificationsService.create({
-                    user_id: session.user_id,
+                    user_id: session.base_session.userId,
                     title: session.passed ? 'ยินดีด้วย! คุณสอบผ่าน CAT 🎉' : 'สอบ CAT เสร็จสิ้น 💪',
                     message: `คุณทำข้อสอบไปทั้งหมด ${session.num_items} ข้อ ค่าความสามารถสุดท้าย (θ) คือ ${session.current_theta.toFixed(2)}`,
                     notification_type_id: session.passed ? 2 : 1,
@@ -490,10 +491,8 @@ export class CATExamService {
                 stop_reason: session.stop_reason,
             };
         } else {
-            // เลือกข้อถัดไป
-            const itemBankWithTopics = await this.getAvailableItemsWithTopics(
-                session.item_bank_id,
-            );
+            // เลือกข้อถัดไปจาก global pool (CAT ไม่ผูกกับ item bank ใด)
+            const itemBankWithTopics = await this.getAvailableItemsWithTopics();
             const usedItemIds = new Set<number>(session.used_item_ids);
 
             let eligibleItems = itemBankWithTopics.filter(
@@ -527,8 +526,12 @@ export class CATExamService {
 
             if (!nextItem) {
                 // ไม่มีข้อเหลือ ต้องจบ
-                session.status = 'COMPLETED';
-                session.end_time = new Date();
+
+                const now = new Date();
+                // อัพเดทเวลาจบที่ฐานหลัก
+                await this.sessionRepo.update(session.session_id, {
+                    end_time: now,
+                });
                 session.final_theta = session.current_theta;
                 session.final_se = session.current_se;
                 session.passed = this.catService.makeDecision(
@@ -543,7 +546,7 @@ export class CATExamService {
                 // แจ้งเตือนเมื่อสอบเสร็จ (กรณีข้อสอบหมด)
                 try {
                     await this.notificationsService.create({
-                        user_id: session.user_id,
+                        user_id: session.base_session.userId,
                         title: session.passed ? 'ยินดีด้วย! คุณสอบผ่าน CAT 🎉' : 'สอบ CAT เสร็จสิ้น 💪',
                         message: `คุณทำข้อสอบไปทั้งหมด ${session.num_items} ข้อ (คลังข้อสอบหมด) ค่าความสามารถสุดท้าย (θ) คือ ${session.current_theta.toFixed(2)}`,
                         notification_type_id: session.passed ? 2 : 1,
@@ -598,16 +601,20 @@ export class CATExamService {
      */
     async getExamResult(userId: number, sessionId: number) {
         const session = await this.catSessionRepo.findOne({
-            where: { session_id: sessionId, user_id: userId },
+            where: { session_id: sessionId },
+            relations: ['base_session'],
         });
 
-        if (!session) {
+        if (!session || session.base_session.userId !== userId) {
             throw new NotFoundException(`ไม่พบ session ID ${sessionId}`);
         }
 
-        const itemBank = await this.itemsBankRepo.findOne({
-            where: { item_bank_id: session.item_bank_id },
-        });
+        // itemBankId อาจเป็น null → ไม่ต้อง query
+        const itemBank = session.base_session.itemBankId
+            ? await this.itemsBankRepo.findOne({
+                where: { item_bank_id: session.base_session.itemBankId! },
+            })
+            : null;
 
         // Fetch full item details for each response to show answers and explanations
         const responsesWithDetails = await Promise.all((session.responses || []).map(async (resp: any) => {
@@ -628,12 +635,72 @@ export class CATExamService {
             };
         }));
 
+        // วิเคราะห์สถิติตามหัวข้อ (เหมือน normal exam)
+        const topicStats = new Map<string, {
+            topic_id: number;
+            topic_name: string;
+            sub_topics: Map<number, { sub_topic_id: number; sub_topic_name: string; correct: number; total: number }>;
+        }>();
+
+        await Promise.all((session.responses || []).map(async (resp: any) => {
+            const itemSubTopics = await this.itemSubTopicRepo.find({
+                where: { item_id: resp.item_id },
+                relations: ['sub_topic', 'sub_topic.topic'],
+            });
+
+            itemSubTopics.forEach(ist => {
+                if (ist.sub_topic?.topic) {
+                    const topicKey = `${ist.sub_topic.topic.topic_id}`;
+                    if (!topicStats.has(topicKey)) {
+                        topicStats.set(topicKey, {
+                            topic_id: ist.sub_topic.topic.topic_id,
+                            topic_name: ist.sub_topic.topic.topic_name,
+                            sub_topics: new Map(),
+                        });
+                    }
+                    const topicData = topicStats.get(topicKey)!;
+                    const subTopicKey = ist.sub_topic.sub_topic_id;
+                    if (!topicData.sub_topics.has(subTopicKey)) {
+                        topicData.sub_topics.set(subTopicKey, {
+                            sub_topic_id: ist.sub_topic.sub_topic_id,
+                            sub_topic_name: ist.sub_topic.sub_topic_name,
+                            correct: 0,
+                            total: 0,
+                        });
+                    }
+                    const subTopicData = topicData.sub_topics.get(subTopicKey)!;
+                    subTopicData.total += 1;
+                    if (resp.is_correct) subTopicData.correct += 1;
+                }
+            });
+        }));
+
+        const topicAnalysis = Array.from(topicStats.values()).map(topic => {
+            const subTopicsArray = Array.from(topic.sub_topics.values()).map(st => ({
+                sub_topic_id: st.sub_topic_id,
+                sub_topic_name: st.sub_topic_name,
+                correct: st.correct,
+                total: st.total,
+                accuracy: st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0,
+            }));
+            const topicCorrect = subTopicsArray.reduce((s, st) => s + st.correct, 0);
+            const topicTotal = subTopicsArray.reduce((s, st) => s + st.total, 0);
+            return {
+                topic_id: topic.topic_id,
+                topic_name: topic.topic_name,
+                correct: topicCorrect,
+                total: topicTotal,
+                accuracy: topicTotal > 0 ? Math.round((topicCorrect / topicTotal) * 100) : 0,
+                sub_topics: subTopicsArray.sort((a, b) => a.accuracy - b.accuracy),
+            };
+        }).sort((a, b) => a.accuracy - b.accuracy);
+
         return {
-            session_id: session.session_id,
+            session_id: Number(session.session_id),
             item_bank_name: itemBank?.bank_name,
-            status: session.status,
-            start_time: session.start_time,
-            end_time: session.end_time,
+            status: session.base_session.end_time ? 'COMPLETED' : 'IN_PROGRESS',
+            start_time: session.base_session.start_time,
+            end_time: session.base_session.end_time,
             current_theta: session.current_theta,
             current_se: session.current_se,
             final_theta: session.final_theta,
@@ -643,34 +710,41 @@ export class CATExamService {
             passed: session.passed,
             stop_reason: session.stop_reason,
             responses: responsesWithDetails,
+            topic_analysis: topicAnalysis,
             pass_percentile: session.final_theta
                 ? this.catService.calculatePassPercentile(session.final_theta)
                 : null,
         };
     }
 
+
     /**
      * ดูประวัติการสอบ CAT
      */
     async getUserCATHistory(userId: number) {
         const sessions = await this.catSessionRepo.find({
-            where: { user_id: userId },
-            order: { start_time: 'DESC' },
+            relations: ['base_session'],
+            where: { base_session: { userId: userId } },
         });
+
+        sessions.sort((a, b) => b.base_session.start_time.getTime() - a.base_session.start_time.getTime());
 
         return Promise.all(
             sessions.map(async (session) => {
-                const itemBank = await this.itemsBankRepo.findOne({
-                    where: { item_bank_id: session.item_bank_id },
-                });
+                // itemBankId อาจเป็น null (CAT ที่ไม่ระบุคลัง)
+                const itemBank = session.base_session.itemBankId
+                    ? await this.itemsBankRepo.findOne({
+                        where: { item_bank_id: session.base_session.itemBankId },
+                    })
+                    : null;
 
                 return {
-                    session_id: session.session_id,
-                    item_bank_id: session.item_bank_id,
+                    session_id: Number(session.session_id),
+                    item_bank_id: session.base_session.itemBankId,
                     item_bank_name: itemBank?.bank_name,
-                    status: session.status,
-                    start_time: session.start_time,
-                    end_time: session.end_time,
+                    status: session.base_session.end_time ? 'COMPLETED' : 'IN_PROGRESS',
+                    start_time: session.base_session.start_time,
+                    end_time: session.base_session.end_time,
                     final_theta: session.final_theta,
                     num_items: session.num_items,
                     num_correct: session.num_correct,
@@ -685,15 +759,46 @@ export class CATExamService {
      */
     async getCATSession(userId: number, sessionId: number) {
         const session = await this.catSessionRepo.findOne({
-            where: { session_id: sessionId, user_id: userId },
+            where: { session_id: sessionId },
+            relations: ['base_session'],
         });
 
-        if (!session) {
+        if (!session || session.base_session.userId !== userId) {
             throw new NotFoundException(`ไม่พบ session ID ${sessionId}`);
         }
 
         return session;
     }
+
+    /**
+     * ยกเลิก CAT session ออกกลางคัน — ลบออกจาก DB ไม่บันทึกประวัติ
+     * (เหมือน normal exam pattern)
+     */
+    async cancelCATSession(userId: number, sessionId: number) {
+        const session = await this.catSessionRepo.findOne({
+            where: { session_id: sessionId },
+            relations: ['base_session'],
+        });
+
+        // ไม่มี session หรือ session จบแล้ว → ไม่ต้องทำอะไร
+        if (!session) {
+            return { message: 'ไม่มี session ที่ต้องลบ', cancelled: false };
+        }
+        if (session.base_session.userId !== userId) {
+            return { message: 'ไม่มีสิทธิ์', cancelled: false };
+        }
+        if (session.base_session.end_time) {
+            return { message: 'session นี้จบแล้ว ไม่สามารถยกเลิกได้', cancelled: false };
+        }
+
+        // ลบ cat_session ก่อน (FK → exam_sessions)
+        await this.catSessionRepo.delete({ session_id: sessionId });
+        // ลบ base exam_session ออกทันที ไม่บันทึกประวัติ
+        await this.sessionRepo.delete({ session_id: sessionId });
+
+        return { message: 'ยกเลิกการสอบ CAT สำเร็จ — ไม่บันทึกประวัติ', cancelled: true };
+    }
+
 
     /**
      * ตรวจสอบว่า item bank พร้อมสำหรับ CAT หรือไม่
@@ -783,10 +888,20 @@ export class CATExamService {
      * ดึงค่าความสามารถล่าสุดของผู้ใช้
      */
     async getLatestAbility(userId: number) {
+        const lastBaseSession = await this.sessionRepo
+            .createQueryBuilder('session')
+            .where('session.userId = :userId', { userId })
+            .andWhere('session.session_type = :type', { type: 'CAT' })
+            .andWhere('session.end_time IS NOT NULL')
+            .orderBy('session.end_time', 'DESC')
+            .getOne();
+
+        if (!lastBaseSession) return { theta: 0.0, has_history: false };
+
         const lastSession = await this.catSessionRepo.findOne({
-            where: { user_id: userId, status: 'COMPLETED' },
-            order: { end_time: 'DESC' },
+            where: { session_id: lastBaseSession.session_id }
         });
+
 
         return {
             theta: lastSession?.final_theta ?? 0.0,
@@ -801,28 +916,30 @@ export class CATExamService {
      */
     async getAdminAnalytics() {
         const sessions = await this.catSessionRepo.find({
-            where: { status: 'COMPLETED' },
-            order: { end_time: 'DESC' },
+            relations: ['base_session'],
         });
 
-        const total = sessions.length;
-        const passed = sessions.filter(s => s.passed).length;
+        // เฉพาะที่จบแล้ว
+        const completedSessions = sessions.filter(s => s.base_session.end_time);
+
+        const total = completedSessions.length;
+        const passed = completedSessions.filter(s => s.passed).length;
         const failed = total - passed;
         const avgTheta = total > 0
-            ? sessions.reduce((sum, s) => sum + (s.final_theta ?? 0), 0) / total
+            ? completedSessions.reduce((sum, s) => sum + (s.final_theta ?? 0), 0) / total
             : 0;
         const avgSE = total > 0
-            ? sessions.reduce((sum, s) => sum + (s.final_se ?? 0), 0) / total
+            ? completedSessions.reduce((sum, s) => sum + (s.final_se ?? 0), 0) / total
             : 0;
         const avgItems = total > 0
-            ? sessions.reduce((sum, s) => sum + (s.num_items ?? 0), 0) / total
+            ? completedSessions.reduce((sum, s) => sum + (s.num_items ?? 0), 0) / total
             : 0;
 
         // Theta distribution: bins of width 0.5 from -3 to 3
         const BINS = [-3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3];
         const thetaDist = BINS.slice(0, -1).map((lo, i) => {
             const hi = BINS[i + 1];
-            const count = sessions.filter(s => {
+            const count = completedSessions.filter(s => {
                 const t = s.final_theta ?? 0;
                 return t >= lo && t < hi;
             }).length;
@@ -831,22 +948,25 @@ export class CATExamService {
 
         // Stop reason breakdown
         const stopReasons: Record<string, number> = {};
-        sessions.forEach(s => {
+        completedSessions.forEach(s => {
             const r = s.stop_reason ?? 'unknown';
             stopReasons[r] = (stopReasons[r] ?? 0) + 1;
         });
 
         // Recent 10 sessions
-        const recent = sessions.slice(0, 10).map(s => ({
-            session_id: s.session_id,
-            user_id: s.user_id,
-            final_theta: s.final_theta,
-            final_se: s.final_se,
-            num_items: s.num_items,
-            passed: s.passed,
-            stop_reason: s.stop_reason,
-            end_time: s.end_time,
-        }));
+        const recent = completedSessions
+            .sort((a, b) => b.base_session.end_time.getTime() - a.base_session.end_time.getTime())
+            .slice(0, 10)
+            .map(s => ({
+                session_id: Number(s.session_id),
+                user_id: s.base_session.userId,
+                final_theta: s.final_theta,
+                final_se: s.final_se,
+                num_items: s.num_items,
+                passed: s.passed,
+                stop_reason: s.stop_reason,
+                end_time: s.base_session.end_time,
+            }));
 
         return {
             total_sessions: total,
@@ -866,11 +986,14 @@ export class CATExamService {
      * [Admin] Item exposure report
      */
     async getItemExposureReport() {
-        const sessions = await this.catSessionRepo.find({ where: { status: 'COMPLETED' } });
-        const totalSessions = sessions.length;
+        const sessions = await this.catSessionRepo.find({
+            relations: ['base_session']
+        });
+        const completedSessions = sessions.filter(s => s.base_session.end_time);
+        const totalSessions = completedSessions.length;
 
         const exposureMap: Record<number, { count: number; correct: number; item_id: number }> = {};
-        sessions.forEach(session => {
+        completedSessions.forEach(session => {
             (session.responses || []).forEach((resp: any) => {
                 if (!exposureMap[resp.item_id]) {
                     exposureMap[resp.item_id] = { item_id: resp.item_id, count: 0, correct: 0 };

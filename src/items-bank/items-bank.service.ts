@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CreateItemsBankDto } from './dto/create-items-bank.dto';
 import { CreateSituationDto } from './dto/create-situation.dto';
 import { UpdateItemsBankDto } from './dto/update-items-bank.dto';
@@ -16,7 +18,6 @@ import { ItemSubTopic } from './entities/item_sub_topics.entity';
 import { CreateBulkQuestionsDto } from './dto/create-bulk-questions.dto';
 import { ItemBankCategory } from './entities/item_bank_category.entity';
 import { ExamSession } from './entities/exam-session.entity';
-import { ExamResponse } from './entities/exam-response.entity';
 import { StartExamDto, SubmitExamDto } from './dto/exam.dto';
 import { UserItemMastery } from './entities/user_item_mastery.entity';
 import { CATSession } from '../cat/entities/cat-session.entity';
@@ -43,8 +44,6 @@ export class ItemsBankService {
     private readonly itemBankCategoryRepo: Repository<ItemBankCategory>,
     @InjectRepository(ExamSession)
     private readonly examSessionRepo: Repository<ExamSession>,
-    @InjectRepository(ExamResponse)
-    private readonly examResponseRepo: Repository<ExamResponse>,
     @InjectRepository(UserItemMastery)
     private readonly userItemMasteryRepo: Repository<UserItemMastery>,
     @InjectRepository(CATSession)
@@ -55,7 +54,12 @@ export class ItemsBankService {
     private readonly notificationRepo: Repository<Notification>,
     private readonly notificationsGateway: NotificationsGateway,
     private readonly dataSource: DataSource,
-  ) { }
+    private readonly configService: ConfigService,
+  ) {
+    this.genAI = new GoogleGenerativeAI(this.configService.get<string>('GEMINI_API_KEY') || '');
+  }
+
+  private genAI: GoogleGenerativeAI;
 
   async createBank(createItemsBankDto: CreateItemsBankDto) {
     const { category_ids, ...bankData } = createItemsBankDto;
@@ -83,6 +87,148 @@ export class ItemsBankService {
     }
 
     return savedBank;
+  }
+
+  /**
+   * เพิ่มข้อสอบเข้าไปใน Item Bank ที่มีอยู่แล้ว โดยใช้ AI อ่านไฟล์ PDF
+   */
+  async addQuestionsFromPdf(item_bank_id: number, file: Express.Multer.File) {
+    if (!file) throw new Error('ไม่พบไฟล์ที่อัปโหลด');
+    const bank = await this.bankRepo.findOne({ where: { item_bank_id } });
+    if (!bank) throw new NotFoundException(`ไม่พบชุดข้อสอบ ID ${item_bank_id}`);
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. ส่งไฟล์ให้ AI สกัดข้อสอบ
+      const extractedQuestions = await this.extractQuestionsFromPdf(file);
+
+      // 2. สร้าง Situation ใหม่สำหรับไฟล์นี้ (เพื่อรองรับ constraint)
+      const existingSituationsCount = await queryRunner.manager.count(ItemSituation, {
+        where: { item_bank_id }
+      });
+
+      const fileName = file.originalname || 'ไฟล์ PDF';
+      const situation = queryRunner.manager.create(ItemSituation, {
+        item_bank_id,
+        situation_text: `ข้อสอบที่ดึงมาจาก ${fileName} (${new Date().toLocaleDateString('th-TH')})`,
+        situation_image_url: '',
+        display_order: existingSituationsCount + 1,
+      });
+      const savedSituation = await queryRunner.manager.save(situation);
+
+      // 3. ดึงจำนวนข้อที่มีอยู่แล้วเพื่อรัน display_order ต่อ
+      const existingItemsCount = await queryRunner.manager.count(ItemBankItem, {
+        where: { item_bank_id }
+      });
+
+      // 4. วนลูปบันทึกข้อสอบ
+      for (let i = 0; i < extractedQuestions.length; i++) {
+        const qData = extractedQuestions[i];
+
+        // สร้าง Item
+        const item = queryRunner.manager.create(Item, {
+          question_text: qData.question_text,
+          explanation: qData.explanation || '',
+          situation_id: savedSituation.situation_id,
+          status: 'ACTIVE',
+          irt_a_discrimination: 0,
+          irt_b_difficulty: 0,
+          irt_c_guessing: 0,
+        });
+        const savedItem = await queryRunner.manager.save(item);
+
+        // เชื่อมกับ Item Bank
+        const itemBankItem = queryRunner.manager.create(ItemBankItem, {
+          item_bank_id: item_bank_id,
+          item_id: savedItem.item_id,
+          display_order: existingItemsCount + i + 1,
+        });
+        await queryRunner.manager.save(itemBankItem);
+
+        // สร้างตัวเลือกคำตอบ
+        if (qData.options && Array.isArray(qData.options)) {
+          for (const opt of qData.options) {
+            const answerOption = queryRunner.manager.create(AnswerOption, {
+              item_id: savedItem.item_id,
+              option_text: opt.text,
+              is_correct: opt.is_correct,
+            });
+            await queryRunner.manager.save(answerOption);
+          }
+        }
+      }
+
+      await queryRunner.commitTransaction();
+
+      return {
+        message: 'เพิ่มข้อสอบจาก PDF สำเร็จ',
+        items_count: extractedQuestions.length,
+        situation_id: savedSituation.situation_id
+      };
+
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      console.error('PDF Processing Error:', error);
+      throw new InternalServerErrorException('เกิดข้อผิดพลาดในการประมวลผล PDF: ' + error.message);
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  private async extractQuestionsFromPdf(file: Express.Multer.File) {
+    try {
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+      const prompt = `ช่วยสกัดข้อสอบจากไฟล์ PDF นี้ โดยมีเงื่อนไขดังนี้:
+      1. แต่ละข้อมีโจทย์ (question_text) และตัวเลือก (options)
+      2. ตัวเลือกที่มีการ "ไฮไลท์สีเหลือง" (Yellow Highlight) ในเอกสาร คือคำตอบที่ถูกต้อง (is_correct: true) 
+      3. ดึงคำอธิบาย (explanation) มาด้วยถ้ามี (ถ้าไม่มีให้เป็นค่าว่าง)
+      4. ตอบกลับเป็น JSON Array เท่านั้น ตามรูปแบบนี้:
+      [
+        {
+          "question_text": "...",
+          "options": [
+            {"text": "...", "is_correct": true/false},
+            ...
+          ],
+          "explanation": "..."
+        }
+      ]
+      ตอบเฉพาะ JSON เท่านั้น ห้ามมีข้อความอื่นหรือ Markdown code block`;
+
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: file.buffer.toString('base64'),
+            mimeType: 'application/pdf',
+          },
+        },
+      ]);
+
+      const response = await result.response;
+      let responseText = response.text();
+      console.log('AI Raw Response:', responseText);
+
+      if (!responseText) throw new Error('AI ไม่ตอบสนอง');
+
+      // พยายามหา [ ... ] ในข้อความ เพราะ AI อาจจะตอบมาพร้อมคำอธิบาย
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+      const jsonString = jsonMatch ? jsonMatch[0] : responseText.replace(/```json|```/g, '').trim();
+
+      try {
+        return JSON.parse(jsonString);
+      } catch (parseError) {
+        console.error('Failed to parse AI response:', responseText);
+        throw new Error('AI ตอบกลับด้วยรูปแบบที่ซับซ้อนเกินไป กรุณาลองใหม่');
+      }
+    } catch (error) {
+      console.error('AI Extraction Error:', error);
+      throw new Error('AI ล้มเหลวในการสกัดข้อมูล: ' + error.message);
+    }
   }
 
   /** ส่ง notification ไปยัง user ทุกคน (role_id = 1) แบบ non-blocking */
@@ -624,16 +770,16 @@ export class ItemsBankService {
     }
 
     const updatedBank = await this.findOne(id);
-    
+
     // แจ้งเตือนเมื่อเปลี่ยนสถานะจาก ปิด เป็น เปิด
     if (oldBank && !oldBank.is_active && updatedBank.is_active) {
-        // ดึง entity หลักเพื่อส่งให้ notify method
-        const bankEntity = await this.bankRepo.findOneBy({ item_bank_id: id });
-        if (bankEntity) {
-            this.notifyAllUsersNewExamBank(bankEntity).catch(err =>
-                console.error('Failed to send exam bank notifications on update:', err)
-            );
-        }
+      // ดึง entity หลักเพื่อส่งให้ notify method
+      const bankEntity = await this.bankRepo.findOneBy({ item_bank_id: id });
+      if (bankEntity) {
+        this.notifyAllUsersNewExamBank(bankEntity).catch(err =>
+          console.error('Failed to send exam bank notifications on update:', err)
+        );
+      }
     }
 
     return updatedBank;
@@ -650,10 +796,8 @@ export class ItemsBankService {
       const sessions = await this.examSessionRepo.find({ where: { itemBankId: id } });
       const sessionIds = sessions.map(s => s.session_id);
 
-      // 2. ลบ Exam Responses (ถ้ามี sessions)
+      // 2. ลบ Exam Sessions
       if (sessionIds.length > 0) {
-        await this.examResponseRepo.delete({ session_id: In(sessionIds) });
-        // 3. ลบ Exam Sessions
         await this.examSessionRepo.delete({ itemBankId: id });
       }
 
@@ -716,9 +860,6 @@ export class ItemsBankService {
 
         // ลบ user_item_mastery (ประวัติการทำข้อสอบของผู้ใช้ในแต่ละข้อ)
         await queryRunner.manager.delete(UserItemMastery, { item_id: item.item_id });
-
-        // ลบ exam_responses (คำตอบในการสอบ)
-        await queryRunner.manager.delete(ExamResponse, { item_id: item.item_id });
 
         // ลบ item
         await queryRunner.manager.delete(Item, { item_id: item.item_id });
@@ -851,8 +992,7 @@ export class ItemsBankService {
     }
 
     // ลบข้อมูลที่เกี่ยวข้อง (ต้องลบตามลำดับ foreign key)
-    // 1. ลบ exam_responses ก่อน (เพราะ reference ไป item)
-    await this.examResponseRepo.delete({ item_id });
+    // 2. ลบข้อมูลอื่นๆ (exam_responses อยู่ใน session JSONB แล้ว ไม่ต้องลบแยก)
 
     // 2. ลบข้อมูลอื่นๆ
     await this.answerOptionRepo.delete({ item_id });
@@ -886,7 +1026,8 @@ export class ItemsBankService {
 
     const session = this.examSessionRepo.create({
       userId: userId,
-      itemBankId: item_bank_id
+      itemBankId: item_bank_id,
+      session_type: 'NORMAL'
     });
 
     const savedSession = await this.examSessionRepo.save(session);
@@ -900,86 +1041,90 @@ export class ItemsBankService {
   }
 
   async cancelExam(userId: number, sessionId: number) {
+    // ดึง Session ออกมาตรวจสอบก่อน
     const session = await this.examSessionRepo.findOne({
-      where: { session_id: sessionId, userId: userId }
+      where: { session_id: sessionId as any }
     });
 
-    // ถ้าไม่มี session หรือ submit แล้ว (มี end_time) ให้ ignore
-    if (!session || session.end_time) {
+    if (!session) {
       return { message: 'ไม่มี session ที่ต้องลบ', cancelled: false };
     }
 
-    // ลบ responses ก่อน (foreign key)
-    await this.examResponseRepo.delete({ session_id: sessionId });
-    // ลบ session
+    // ตรวจสอบว่าเป็นเจ้าของหรือไม่
+    if (session.userId !== userId) {
+      throw new UnauthorizedException('คุณไม่มีสิทธิ์ยกเลิก session นี้');
+    }
+
+    // ถ้า submit แล้ว (มี end_time) ให้ ignore
+    if (session.end_time) {
+      return { message: 'session นี้จบไปแล้ว ไม่สามารถยกเลิกได้', cancelled: false };
+    }
+
+    // ลบ session (responses อยู่ใน JSONB แล้ว ไม่ต้อง delete แยก)
     await this.examSessionRepo.delete({ session_id: sessionId });
 
     return { message: 'ยกเลิกการสอบสำเร็จ — ไม่บันทึกประวัติ', cancelled: true };
   }
 
   async submitExam(userId: number, sessionId: number, submitExamDto: SubmitExamDto) {
-    // ตรวจสอบ session
+    // ค้นหา Session และตรวจสอบสิทธิ์
     const session = await this.examSessionRepo.findOne({
-      where: { session_id: sessionId, userId: userId }
+      where: { session_id: sessionId as any }
     });
 
     if (!session) {
       throw new NotFoundException(`ไม่พบ session ID ${sessionId}`);
     }
+    if (session.userId !== userId) {
+      throw new UnauthorizedException(`คุณไม่มีสิทธิ์เข้าถึง session ID ${sessionId}`);
+    }
 
     const { answers } = submitExamDto;
     let correctCount = 0;
-    let totalQuestions = answers.length;
+    const totalQuestions = answers.length;
+    const responsesArray: any[] = [];
 
-    // บันทึกคำตอบแต่ละข้อ
+    // ดึงข้อมูลคำถามทั้งหมดพร้อมกัน (batch) แทนการดึงทีละข้อ
+    const itemIds = answers.map(a => a.item_id);
+    const items = await this.itemRepo.find({
+      where: { item_id: In(itemIds) },
+      relations: ['answer_options']
+    });
+    const itemMap = new Map(items.map(i => [i.item_id, i]));
+
     for (let i = 0; i < answers.length; i++) {
       const answer = answers[i];
-
-      // ดึงข้อมูลคำถาม
-      const item = await this.itemRepo.findOne({
-        where: { item_id: answer.item_id },
-        relations: ['answer_options']
-      });
-
+      const item = itemMap.get(answer.item_id);
       if (!item) continue;
 
-      // หาคำตอบที่ถูกต้อง
       const correctOption = item.answer_options?.find(opt => opt.is_correct);
-
-      // แปลงเป็น number เพื่อให้แน่ใจว่าเปรียบเทียบถูกต้อง
       const selectedId = answer.selected_option_id ? Number(answer.selected_option_id) : null;
       const correctId = correctOption?.option_id ? Number(correctOption.option_id) : null;
       const isCorrect = selectedId === correctId;
       if (isCorrect) correctCount++;
 
-      // บันทึก response
-      const response = this.examResponseRepo.create({
-        session_id: sessionId,
+      // เพิ่ม response เข้า array (เก็บเฉพาะข้อมูลที่จำเป็นสำหรับ NORMAL exam)
+      responsesArray.push({
         item_id: answer.item_id,
         selected_option_id: selectedId,
+        correct_option_id: correctId,
         is_correct: isCorrect,
         order_presented: i + 1,
-        response_time_ms: answer.response_time_ms,
-        irt_a_param: item.irt_a_discrimination,
-        irt_b_param: item.irt_b_difficulty,
-        irt_c_param: item.irt_c_guessing
+        response_time_ms: answer.response_time_ms || 0,
       });
-
-      await this.examResponseRepo.save(response);
 
       // อัพเดทสถิติการตอบคำถามของผู้ใช้
       await this.updateUserItemMastery(userId, answer.item_id, isCorrect);
     }
 
-    // คำนวณคะแนน
-    const finalScore = (correctCount / totalQuestions) * 100;
-
-    // อัพเดท session
+    // คำนวณคะแนน และอัพเดท session ทีเดียว
+    const finalScore = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
     await this.examSessionRepo.update(
-      { session_id: sessionId },
+      { session_id: sessionId as any },
       {
         end_time: new Date(),
-        final_score: finalScore
+        final_score: finalScore,
+        responses: responsesArray,
       }
     );
 
@@ -1037,40 +1182,45 @@ export class ItemsBankService {
 
   async getExamResult(userId: number, sessionId: number) {
     const session = await this.examSessionRepo.findOne({
-      where: { session_id: sessionId, userId: userId },
+      where: { session_id: sessionId as any },
       relations: ['item_bank']
     });
 
     if (!session) {
       throw new NotFoundException(`ไม่พบ session ID ${sessionId}`);
     }
+    if (session.userId !== userId) {
+      throw new UnauthorizedException(`คุณไม่มีสิทธิ์เข้าถึงผลการสอบของ session ID ${sessionId}`);
+    }
 
-    // ดึงคำตอบทั้งหมด
-    const responses = await this.examResponseRepo.find({
-      where: { session_id: sessionId },
-      relations: ['item', 'item.answer_options', 'item.situation'],
-      order: { order_presented: 'ASC' }
+    // อ่าน responses จาก JSONB
+    const storedResponses: any[] = session.responses || [];
+    const totalQuestions = storedResponses.length;
+    const correctCount = storedResponses.filter(r => r.is_correct).length;
+
+    // ดึงข้อมูลจากตาราง items เพิ่มเติม (batch)
+    const itemIds = storedResponses.map(r => r.item_id);
+    const items = await this.itemRepo.find({
+      where: { item_id: In(itemIds) },
+      relations: ['answer_options', 'situation']
     });
+    const itemMap = new Map(items.map(i => [i.item_id, i]));
 
-    const totalQuestions = responses.length;
-    const correctCount = responses.filter(r => r.is_correct).length;
-
-    // ดึงข้อมูล sub_topics สำหรับแต่ละคำถาม และวิเคราะห์ตามหัวข้อ
+    // วิเคราะห์สถิติตามหัวข้อ
     const topicStats = new Map<string, { topic_id: number, topic_name: string, sub_topics: Map<number, { sub_topic_id: number, sub_topic_name: string, correct: number, total: number }> }>();
 
-    const responsesWithSubTopics = await Promise.all(
-      responses.map(async (r) => {
-        // ดึง sub topics ของคำถามนี้
+    const responsesWithDetails = await Promise.all(
+      storedResponses.map(async (r) => {
+        const item = itemMap.get(r.item_id);
+
         const itemSubTopics = await this.itemSubTopicRepo.find({
           where: { item_id: r.item_id },
           relations: ['sub_topic', 'sub_topic.topic']
         });
 
-        // วิเคราะห์สถิติตามหัวข้อ
         itemSubTopics.forEach(ist => {
           if (ist.sub_topic && ist.sub_topic.topic) {
             const topicKey = `${ist.sub_topic.topic.topic_id}`;
-
             if (!topicStats.has(topicKey)) {
               topicStats.set(topicKey, {
                 topic_id: ist.sub_topic.topic.topic_id,
@@ -1078,12 +1228,9 @@ export class ItemsBankService {
                 sub_topics: new Map()
               });
             }
-
             const topicData = topicStats.get(topicKey);
-            if (!topicData) return; // Skip if topicData is undefined
-
+            if (!topicData) return;
             const subTopicKey = ist.sub_topic.sub_topic_id;
-
             if (!topicData.sub_topics.has(subTopicKey)) {
               topicData.sub_topics.set(subTopicKey, {
                 sub_topic_id: ist.sub_topic.sub_topic_id,
@@ -1092,26 +1239,23 @@ export class ItemsBankService {
                 total: 0
               });
             }
-
             const subTopicData = topicData.sub_topics.get(subTopicKey);
-            if (!subTopicData) return; // Skip if subTopicData is undefined
-
+            if (!subTopicData) return;
             subTopicData.total += 1;
-            if (r.is_correct) {
-              subTopicData.correct += 1;
-            }
+            if (r.is_correct) subTopicData.correct += 1;
           }
         });
 
         return {
           item_id: r.item_id,
-          question_text: r.item.question_text,
-          explanation: r.item.explanation,
+          question_text: item?.question_text,
+          explanation: item?.explanation,
           selected_option_id: r.selected_option_id,
+          correct_option_id: r.correct_option_id,
           is_correct: r.is_correct,
           response_time_ms: r.response_time_ms,
-          answer_options: r.item.answer_options,
-          situation: r.item.situation,
+          answer_options: item?.answer_options,
+          situation: item?.situation,
           sub_topics: itemSubTopics.map(ist => ({
             sub_topic_id: ist.sub_topic.sub_topic_id,
             sub_topic_name: ist.sub_topic.sub_topic_name,
@@ -1124,7 +1268,6 @@ export class ItemsBankService {
       })
     );
 
-    // แปลง Map เป็น Array และคำนวณเปอร์เซ็นต์
     const topicAnalysis = Array.from(topicStats.values()).map(topic => {
       const subTopicsArray = Array.from(topic.sub_topics.values()).map(st => ({
         sub_topic_id: st.sub_topic_id,
@@ -1133,31 +1276,29 @@ export class ItemsBankService {
         total: st.total,
         accuracy: st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0
       }));
-
       const topicCorrect = subTopicsArray.reduce((sum, st) => sum + st.correct, 0);
       const topicTotal = subTopicsArray.reduce((sum, st) => sum + st.total, 0);
-
       return {
         topic_id: topic.topic_id,
         topic_name: topic.topic_name,
         correct: topicCorrect,
         total: topicTotal,
         accuracy: topicTotal > 0 ? Math.round((topicCorrect / topicTotal) * 100) : 0,
-        sub_topics: subTopicsArray.sort((a, b) => a.accuracy - b.accuracy) // เรียงจุดอ่อนก่อน
+        sub_topics: subTopicsArray.sort((a, b) => a.accuracy - b.accuracy)
       };
-    }).sort((a, b) => a.accuracy - b.accuracy); // เรียงจุดอ่อนก่อน
+    }).sort((a, b) => a.accuracy - b.accuracy);
 
     return {
       session_id: sessionId,
-      item_bank_name: session.item_bank.bank_name,
+      item_bank_name: session.item_bank?.bank_name ?? null,
       status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS',
       start_time: session.start_time,
       end_time: session.end_time,
       total_questions: totalQuestions,
       correct_count: correctCount,
       final_score: session.final_score,
-      responses: responsesWithSubTopics,
-      topic_analysis: topicAnalysis // จุดแข็ง-จุดอ่อนตามหัวข้อ
+      responses: responsesWithDetails,
+      topic_analysis: topicAnalysis
     };
   }
 
@@ -1176,6 +1317,7 @@ export class ItemsBankService {
         .createQueryBuilder('session')
         .leftJoinAndSelect('session.item_bank', 'item_bank')
         .where('session.userId = :userId', { userId })
+        .andWhere('session.session_type = :sessionType', { sessionType: 'NORMAL' })
         .andWhere('session.end_time IS NOT NULL');
 
       if (filters?.item_bank_id) {
@@ -1200,19 +1342,28 @@ export class ItemsBankService {
 
       const normalHistory = await Promise.all(
         sessions.map(async (session) => {
-          const categoryRelations = await this.itemBankCategoryRepo.find({
-            where: { item_bank_id: session.itemBankId },
-            relations: ['category']
-          });
+          // itemBankId อาจเป็น null (CAT session ที่ไม่ผูกกับคลัง)
+          const categoryRelations = session.itemBankId
+            ? await this.itemBankCategoryRepo.find({
+                where: { item_bank_id: session.itemBankId! },
+                relations: ['category']
+              })
+            : [];
+
+          const responses = session.responses ?? [];
+          const totalQ = responses.length;
+          const correctCount = responses.filter((r: any) => r.is_correct).length;
 
           return {
             session_id: Number(session.session_id),
             item_bank_id: session.itemBankId,
-            item_bank_name: session.item_bank.bank_name,
+            item_bank_name: session.item_bank?.bank_name ?? null,
             status: 'COMPLETED',
             start_time: session.start_time,
             end_time: session.end_time,
             final_score: session.final_score,
+            total_questions: totalQ,
+            correct_count: correctCount,
             exam_type: 'NORMAL',
             categories: categoryRelations.map(cr => ({
               category_id: cr.category.category_id,
@@ -1230,7 +1381,7 @@ export class ItemsBankService {
         .createQueryBuilder('cat')
         .leftJoinAndMapOne('cat.item_bank', ItemsBank, 'item_bank', 'item_bank.item_bank_id = cat.item_bank_id')
         .where('cat.user_id = :userId', { userId })
-        .andWhere('cat.status = :status', { status: 'COMPLETED' });
+        .andWhere('cat.end_time IS NOT NULL');
 
       if (filters?.item_bank_id) {
         catQuery = catQuery.andWhere('cat.item_bank_id = :itemBankId', {

@@ -5,13 +5,16 @@ import { HttpModule } from '@nestjs/axios';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Chat_session } from './entities/chat_session.entity';
 import { Chat_message } from './entities/chat_message.entity';
+import { ChatbotDocument } from './entities/chatbot_document.entity';
+import { ChatbotDocumentsController } from './chatbot-documents.controller';
+import { ChatbotDocumentsService } from './chatbot-documents.service';
 
 @Module({
   imports: [
     HttpModule,
-    TypeOrmModule.forFeature([Chat_session, Chat_message])
+    TypeOrmModule.forFeature([Chat_session, Chat_message, ChatbotDocument])
   ],
-  controllers: [ChatController],
-  providers: [ChatService],
+  controllers: [ChatController, ChatbotDocumentsController],
+  providers: [ChatService, ChatbotDocumentsService],
 })
 export class ChatModule { }

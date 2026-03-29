@@ -18,7 +18,7 @@ export class Item {
     @PrimaryGeneratedColumn()
     item_id: number;
 
-    @Column({ type: 'varchar', length: 255 })
+    @Column({ type: 'text' })
     question_text: string;
 
     @Column({ type: 'float4', nullable: true })
@@ -30,7 +30,7 @@ export class Item {
     @Column({ type: 'float4', nullable: true })
     irt_c_guessing?: number;
 
-    @Column({ type: 'varchar', length: 255 })
+    @Column({ type: 'text' })
     explanation: string;
 
     @Column({ type: 'integer' })

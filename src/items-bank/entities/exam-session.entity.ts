@@ -3,10 +3,8 @@ import {
     PrimaryGeneratedColumn,
     Column,
     ManyToOne,
-    OneToMany,
     JoinColumn,
     CreateDateColumn,
-    UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { ItemsBank } from './items-bank.entity';
@@ -19,8 +17,16 @@ export class ExamSession {
     @Column({ name: 'user_id', type: 'int' })
     userId: number;
 
-    @Column({ name: 'item_bank_id', type: 'int' })
-    itemBankId: number;
+    // nullable: true เพราะ CAT exam อาจไม่ได้ผูกกับ item_bank ใดโดยเฉพาะ
+    @Column({ name: 'item_bank_id', type: 'int', nullable: true })
+    itemBankId: number | null;
+
+    @Column({
+        type: 'varchar',
+        length: 20,
+        default: 'NORMAL'
+    })
+    session_type: string;
 
     @CreateDateColumn({ type: 'timestamptz' })
     start_time: Date;
@@ -31,18 +37,16 @@ export class ExamSession {
     @Column({ type: 'float', nullable: true })
     final_score: number;
 
-    @Column({ type: 'float', nullable: true })
-    final_ability_estimate: number;
+    // เก็บคำตอบทั้งหมดเป็น JSONB array
+    @Column({ type: 'jsonb', nullable: true, default: '[]' })
+    responses: any[];
 
     // Relations
     @ManyToOne(() => User)
     @JoinColumn({ name: 'user_id' })
     user: User;
 
-    @ManyToOne(() => ItemsBank)
+    @ManyToOne(() => ItemsBank, { nullable: true })
     @JoinColumn({ name: 'item_bank_id' })
-    item_bank: ItemsBank;
-
-    @OneToMany('ExamResponse', 'session')
-    responses: any[];
+    item_bank: ItemsBank | null;
 }

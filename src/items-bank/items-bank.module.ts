@@ -11,7 +11,6 @@ import { AnswerOption } from './entities/answer_options.entity';
 import { ItemSubTopic } from './entities/item_sub_topics.entity';
 import { ItemBankCategory } from './entities/item_bank_category.entity';
 import { ExamSession } from './entities/exam-session.entity';
-import { ExamResponse } from './entities/exam-response.entity';
 import { UserItemMastery } from './entities/user_item_mastery.entity';
 import { User } from '../users/entities/user.entity';
 import { Notification } from '../notifications/entities/notification.entity';
@@ -29,7 +28,6 @@ import { NotificationsModule } from '../notifications/notifications.module';
       ItemSubTopic,
       ItemBankCategory,
       ExamSession,
-      ExamResponse,
       UserItemMastery,
       CATSession,
       User,

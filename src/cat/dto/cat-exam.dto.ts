@@ -1,9 +1,7 @@
 import { IsNotEmpty, IsNumber, IsOptional, IsString, IsObject } from 'class-validator';
 
 export class StartCATExamDto {
-    @IsOptional()
-    @IsNumber()
-    item_bank_id?: number;
+    // item_bank_id ถูกลบออกแล้ว: CAT ดึงข้อสอบจากทุกคลัง (global pool) เสมอ
 
     @IsOptional()
     @IsNumber()
@@ -29,9 +27,7 @@ export class StartCATExamDto {
     @IsNumber()
     cut_score?: number;
 
-    @IsOptional()
-    @IsString()
-    mode?: string; // 'real' | 'demo-easy' | 'demo-medium' | 'demo-hard'
+
 }
 
 export class SubmitCATAnswerDto {
