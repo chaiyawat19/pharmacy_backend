@@ -93,22 +93,22 @@ export class ChatbotDocumentsService {
         // จัดรูปแบบ Request ทีละตัวใน Batch
         const requests = chunkBatch.map(content => ({
             content: { role: 'user', parts: [{ text: content }] },
-            outputDimensionality: 1024 // ปรับให้ตรงกับ Pinecone Index ของคุณ!
+            outputDimensionality: 768 // ตรงกับ Pinecone Index ที่สร้างไว้ (768 dims)
         }));
 
         const result = await embeddingModel.batchEmbedContents({ requests });
         const embeddings = result.embeddings;
 
-        // 4.2 ยัดลง Pinecone พร้อมแนบ Metadata
+        // 4.2 แปลง embeddings เป็น vector records สำหรับ Pinecone
         const vectors = (embeddings || []).map((emb, idx) => {
-          // ดึงค่า vector ออกมาให้ชัวร์ที่สุด
+          // ใช้ Array.from() เพื่อให้แน่ใจว่าเป็น plain number[] ไม่ใช่ Float32Array หรือ typed array
           let finalValues: number[] = [];
-          if (Array.isArray(emb.values)) {
-            finalValues = emb.values;
-          } else if (emb['embedding'] && Array.isArray(emb['embedding'].values)) {
-            finalValues = emb['embedding'].values;
+          if (emb.values) {
+            finalValues = Array.from(emb.values as any);
+          } else if (emb['embedding']?.values) {
+            finalValues = Array.from(emb['embedding'].values as any);
           }
-          
+
           return {
             id: `doc-${savedDoc.id}-chunk-${i + idx}`,
             values: finalValues,
@@ -120,29 +120,18 @@ export class ChatbotDocumentsService {
           };
         });
 
-        // กรองเฉพาะ vector ที่มีข้อมูลจริงๆ
+        // กรองเฉพาะ vector ที่มีค่าจริงๆ
         const validVectors = vectors.filter(v => v.values && v.values.length > 0);
+        this.logger.log(`Batch ${(i / batchSize) + 1}: ${validVectors.length} valid vectors (${validVectors[0]?.values?.length ?? 0} dims each)`);
 
         if (validVectors.length > 0) {
-          try {
-            // สำคัญมาก: ทดสอบแล้วว่าใน SDK v7.1.0 การระบุ namespace('') เป็นสิ่งจำเป็นสำหรับ Serverless Index
-            // และจำนวน Dimension ต้องตรงกัน (1024)
-            await this.pineconeIndex.namespace('').upsert(validVectors);
-            this.logger.log(`Upsert successful: Batch ${(i / batchSize) + 1} with ${validVectors.length} vectors (1024 dims)`);
-          } catch (upsertError) {
-            this.logger.error(`Upsert failed still: ${upsertError.message}`);
-            // Fallback: ลองจัดระเบียบข้อมูลใหม่เผื่อมีอะไรแปลกปลอม
-            try {
-              const cleanVectors = JSON.parse(JSON.stringify(validVectors));
-              await this.pineconeIndex.namespace('').upsert(cleanVectors);
-              this.logger.log(`Upsert successful after JSON sterilization for document ${savedDoc.id}`);
-            } catch (retryError) {
-              this.logger.error(`Final attempt failed. Sample vector values count: ${validVectors[0].values.length}`);
-              throw retryError;
-            }
-          }
+          // ใช้ namespace แยกต่อเอกสาร เพื่อให้ลบได้ง่ายด้วย deleteAll()
+          const ns = this.pineconeIndex.namespace(`doc-${savedDoc.id}`);
+          // SDK v7.x: upsert ต้องการ { records: [...] } ไม่ใช่ array โดยตรง
+          await ns.upsert({ records: validVectors });
+          this.logger.log(`Upsert successful: Batch ${(i / batchSize) + 1} with ${validVectors.length} vectors into namespace doc-${savedDoc.id}`);
         } else {
-          this.logger.warn(`No valid vectors (with values) found for document ${savedDoc.id} in this batch.`);
+          this.logger.warn(`No valid vectors found for document ${savedDoc.id} in batch ${(i / batchSize) + 1}.`);
         }
       }
 
@@ -152,13 +141,11 @@ export class ChatbotDocumentsService {
     } catch (error) {
       this.logger.error(`Error processing document ${savedDoc.id}:`, error);
       
-      // Cleanup: หากพังกลางคัน ให้ลบ record ใน DB และลบ vector ที่อาจจะหลุดเข้าไปใน Pinecone แล้วทิ้ง
+      // Cleanup: หากพังกลางคัน ให้ลบ namespace ของเอกสารนี้ออกจาก Pinecone
       try {
-        await this.pineconeIndex.namespace('').deleteMany({
-          filter: { document_id: { $eq: savedDoc.id } }
-        });
+        await this.pineconeIndex.namespace(`doc-${savedDoc.id}`).deleteAll();
       } catch (cleanupError) {
-        this.logger.error(`Failed to cleanup Pinecone for document ${savedDoc.id}:`, cleanupError);
+        this.logger.error(`Failed to cleanup Pinecone namespace for document ${savedDoc.id}:`, cleanupError);
       }
       
       await this.chatbotDocumentRepo.delete(savedDoc.id);
@@ -173,13 +160,11 @@ export class ChatbotDocumentsService {
     }
 
     try {
-      // 1. ลบจาก Pinecone ผ่านตัวกรองเงื่อนไข (Metadata Filter)
-      await this.pineconeIndex.namespace('').deleteMany({
-        filter: { document_id: { $eq: id } }
-      });
-      this.logger.log(`Deleted all vectors for document_id: ${id}`);
+      // 1. ลบทุก vector ใน namespace ของเอกสารนี้ (รองรับ Pinecone Serverless)
+      await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
+      this.logger.log(`Deleted all vectors in namespace doc-${id}`);
     } catch (error) {
-      this.logger.error(`Error deleting vectors for document ${id}:`, error);
+      this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
     }
 
     // 2. ลบออกจาก PostgreSQL ของเรา

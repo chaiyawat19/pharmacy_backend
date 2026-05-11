@@ -9,7 +9,7 @@
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start:dev": "cross-env NODE_OPTIONS=--dns-result-order=ipv4first nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
@@ -23,8 +23,6 @@
     "migration:revert": "npx ts-node -r tsconfig-paths/register --project tsconfig.migration.json ./node_modules/typeorm/cli.js migration:revert -d src/data-source.ts",
     "migration:show": "npx ts-node -r tsconfig-paths/register --project tsconfig.migration.json ./node_modules/typeorm/cli.js migration:show -d src/data-source.ts",
     "migration:create": "npx ts-node -r tsconfig-paths/register --project tsconfig.migration.json ./node_modules/typeorm/cli.js migration:create"
-
-
   },
   "dependencies": {
     "@google/genai": "^1.37.0",
@@ -79,6 +77,7 @@
     "@types/passport-local": "^1.0.38",
     "@types/pdf-parse": "^1.1.5",
     "@types/supertest": "^6.0.2",
+    "cross-env": "^10.1.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",
