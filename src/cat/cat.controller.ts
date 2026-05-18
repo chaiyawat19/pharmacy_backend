@@ -10,8 +10,8 @@ import {
 } from '@nestjs/common';
 import { CATExamService } from './cat-exam.service';
 import { StartCATExamDto, SubmitCATAnswerDto } from './dto/cat-exam.dto';
-import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
-import { Roles } from '../common/decorators/role.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('cat')
 @UseGuards(JwtAuthGuard)

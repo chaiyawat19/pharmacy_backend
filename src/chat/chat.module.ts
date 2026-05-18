@@ -6,15 +6,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Chat_session } from './entities/chat_session.entity';
 import { Chat_message } from './entities/chat_message.entity';
 import { ChatbotDocument } from './entities/chatbot_document.entity';
-import { ChatbotDocumentsController } from './chatbot-documents.controller';
-import { ChatbotDocumentsService } from './chatbot-documents.service';
 
 @Module({
   imports: [
     HttpModule,
-    TypeOrmModule.forFeature([Chat_session, Chat_message, ChatbotDocument])
+    TypeOrmModule.forFeature([Chat_session, Chat_message, ChatbotDocument]),
   ],
-  controllers: [ChatController, ChatbotDocumentsController],
-  providers: [ChatService, ChatbotDocumentsService],
+  controllers: [ChatController],
+  providers: [ChatService],
 })
-export class ChatModule { }
+export class ChatModule {}

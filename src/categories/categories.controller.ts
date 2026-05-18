@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/commo
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
-import { Roles } from 'src/common/decorators/role.decorator';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Roles(2)
 @Controller('categories')

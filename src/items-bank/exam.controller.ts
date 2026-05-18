@@ -2,7 +2,7 @@ import { Controller, Get, Post, Delete, Body, Param, Req, UseGuards, Query } fro
 import { ItemsBankService } from './items-bank.service';
 import { StartExamDto, SubmitExamDto } from './dto/exam.dto';
 import { ExamHistoryFilterDto } from './dto/exam-history-filter.dto';
-import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
 /**
  * Controller for exam-related endpoints

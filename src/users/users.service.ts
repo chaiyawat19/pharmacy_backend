@@ -37,7 +37,6 @@ export class UsersService {
     const users = await this.userRepository.find({
       relations: { university: true, role: true },
     });
-    console.log(users);
     return users;
   }
 
@@ -124,7 +123,6 @@ export class UsersService {
 
     Object.assign(user, updateData);
     const updatedUser = await this.userRepository.save(user);
-    console.log('Updated user:', updatedUser);
     return updatedUser;
   }
 }

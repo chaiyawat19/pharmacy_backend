@@ -12,8 +12,8 @@ import {
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { LocalAuthGuard } from './local-auth.guard';
-import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
-import { Public } from 'src/common/decorators/public.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 import { AuthGuard } from '@nestjs/passport';
 
 @Controller('auth')

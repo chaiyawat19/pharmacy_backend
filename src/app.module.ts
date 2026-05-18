@@ -9,8 +9,8 @@ import { RolesModule } from './roles/roles.module';
 import { AuthModule } from './auth/auth.module';
 
 import { APP_GUARD } from '@nestjs/core';
-import { RolesGuard } from './common/guard/roles.guard';
-import { JwtAuthGuard } from './common/guard/jwt-auth.guard'; // import guard ใหม่
+import { RolesGuard } from './common/guards/roles.guard';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { NotesModule } from './notes/notes.module';
 import { ChatModule } from './chat/chat.module';
 import { ItemsBankModule } from './items-bank/items-bank.module';
@@ -26,6 +26,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { BookmarkModule } from './bookmark/bookmark.module';
 import { IrtModule } from './irt/irt.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 
 
 @Module({
@@ -63,6 +64,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     BookmarkModule,
     IrtModule,
     DashboardModule,
+    ChatbotModule,
     UserDashboardModule,
   ],
   controllers: [AppController],
