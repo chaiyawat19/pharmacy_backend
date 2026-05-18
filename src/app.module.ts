@@ -9,6 +9,7 @@ import { RolesModule } from './roles/roles.module';
 import { AuthModule } from './auth/auth.module';
 
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { RolesGuard } from './common/guards/roles.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { NotesModule } from './notes/notes.module';
@@ -32,6 +33,19 @@ import { ChatbotModule } from './chatbot/chatbot.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // ── S2.2: Rate Limiting ────────────────────────────────────────────────
+    ThrottlerModule.forRoot([
+      {
+        name: 'global',
+        ttl: 60000,  // 1 นาที
+        limit: 60,   // 60 requests/นาที ต่อ IP (global)
+      },
+      {
+        name: 'auth',
+        ttl: 60000,  // 1 นาที
+        limit: 10,   // 10 requests/นาที สำหรับ auth endpoints
+      },
+    ]),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -70,6 +84,10 @@ import { ChatbotModule } from './chatbot/chatbot.module';
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,  // Rate limiting (ลำดับแรก)
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

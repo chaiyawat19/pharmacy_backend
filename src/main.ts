@@ -6,6 +6,7 @@ import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ServerOptions } from 'socket.io';
+import helmet from 'helmet';
 
 // ✅ Custom IoAdapter พร้อม CORS
 class CustomIoAdapter extends IoAdapter {
@@ -14,7 +15,7 @@ class CustomIoAdapter extends IoAdapter {
       ...options,
       cors: {
         origin: [
-          'https://phamacyexam-frontend-fork-production.up.railway.app',
+          process.env.FRONTEND_URL || 'http://localhost:3000',
           'http://localhost:3000',
           'http://localhost:8080',
         ],
@@ -27,13 +28,26 @@ class CustomIoAdapter extends IoAdapter {
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  
+
+  // ── S2.3: Helmet — HTTP Security Headers ──────────────────────────────────
+  // ปิด contentSecurityPolicy เพื่อไม่ให้ขัด API responses
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+
+  // ── CORS ──────────────────────────────────────────────────────────────────
+  const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'https://phamacyexam-frontend-fork-production.up.railway.app',
+    'http://localhost:3000',
+    'http://localhost:8080',
+  ].filter(Boolean) as string[];
+
   app.enableCors({
-    origin: [
-      'https://phamacyexam-frontend-fork-production.up.railway.app',
-      'http://localhost:3000',
-      'http://localhost:8080',
-    ],
+    origin: allowedOrigins,
     credentials: true,
   });
 
@@ -42,7 +56,15 @@ async function bootstrap() {
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
   app.use(cookieParser());
-  app.useGlobalPipes(new ValidationPipe());
+
+  // ── S2.1: ValidationPipe — Whitelist + Transform ──────────────────────────
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,             // ตัด field ที่ไม่อยู่ใน DTO ออกอัตโนมัติ
+      forbidNonWhitelisted: true,  // ส่ง 400 ถ้ามี field แปลกปลอม
+      transform: true,             // auto-transform types เช่น string → number
+    }),
+  );
 
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',

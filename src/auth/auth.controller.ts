@@ -15,6 +15,7 @@ import { LocalAuthGuard } from './local-auth.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthGuard } from '@nestjs/passport';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 
 @Controller('auth')
 export class AuthController {
@@ -23,12 +24,13 @@ export class AuthController {
     private readonly usersService: UsersService,
   ) {}
 
+  /** Login — จำกัด 10 ครั้ง/นาที ป้องกัน brute force */
+  @Throttle({ auth: {} })
   @Public()
   @UseGuards(LocalAuthGuard)
   @Post('login')
   async login(@Request() req, @Res({ passthrough: true }) res) {
     const { accessToken } = await this.authService.login(req.user);
-
     return {
       message: 'Login successful',
       accessToken,
@@ -36,6 +38,8 @@ export class AuthController {
     };
   }
 
+  /** Forgot password — จำกัด 10 ครั้ง/นาที ป้องกัน spam email */
+  @Throttle({ auth: {} })
   @Public()
   @Post('forgot-password')
   async forgotPassword(@Body('email') email: string) {

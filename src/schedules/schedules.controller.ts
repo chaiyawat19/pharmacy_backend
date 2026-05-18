@@ -11,11 +11,12 @@ import {
   UnauthorizedException,
   UseInterceptors,
   UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
 import { SchedulesService } from './schedules.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
-import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('schedules')
@@ -45,16 +46,36 @@ export class SchedulesController {
     return this.schedulesService.create(dto, userId);
   }
 
+  /**
+   * อัปโหลดไฟล์ PDF ตารางสอบเพื่อให้ AI สกัดข้อมูล
+   * S2.5: รับเฉพาะ PDF, ขนาดสูงสุด 20MB
+   */
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      fileFilter: (req, file, cb) => {
+        if (file.mimetype !== 'application/pdf') {
+          return cb(
+            new BadRequestException('รองรับเฉพาะไฟล์ PDF เท่านั้น'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: {
+        fileSize: 20 * 1024 * 1024, // 20MB max สำหรับ PDF
+        files: 1,
+      },
+    }),
+  )
   async uploadPdf(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
-      throw new Error('กรุณาอัปโหลดไฟล์ PDF');
+      throw new BadRequestException('กรุณาอัปโหลดไฟล์ PDF');
     }
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const events = await this.schedulesService.extractEventsFromPdf(file);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return events; // คืนค่าเป็น Array ออกไปตรงๆ เลย
+    return events;
   }
 
   @Get()

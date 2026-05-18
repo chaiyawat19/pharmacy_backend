@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Req, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Req, Query, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ItemsBankService } from './items-bank.service';
 import { IrtManagementService } from './irt-management.service';
@@ -125,12 +125,27 @@ export class ItemsBankController {
   }
 
   @Post(':id/upload-pdf')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      fileFilter: (req, file, cb) => {
+        if (file.mimetype !== 'application/pdf') {
+          return cb(
+            new BadRequestException('รองรับเฉพาะไฟล์ PDF เท่านั้น'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: {
+        fileSize: 30 * 1024 * 1024, // 30MB max สำหรับ PDF ข้อสอบ
+        files: 1,
+      },
+    }),
+  )
   uploadPdf(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    console.log(`Uploading PDF for bank ${id}:`, file?.originalname, 'Size:', file?.size);
     return this.itemsBankService.addQuestionsFromPdf(+id, file);
   }
 
