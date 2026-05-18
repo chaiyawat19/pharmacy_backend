@@ -83,6 +83,6 @@ export class AuthController {
       throw new Error('Google authentication failed');
     }
     const accessToken = await this.authService.socialLogin(req.user);
-    return res.redirect('http://localhost:3000/user');
+    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/user`);
   }
 }

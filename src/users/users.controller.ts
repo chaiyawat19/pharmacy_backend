@@ -28,6 +28,7 @@ export class UsersController {
     };
   }
 
+  @Roles(2)
   @Get()
   findAll() {
     return this.usersService.findAll();

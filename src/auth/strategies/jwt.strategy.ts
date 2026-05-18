@@ -5,16 +5,22 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET environment variable is not set. Application cannot start securely.');
+    }
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKey: process.env.JWT_SECRET || 'SECRETKEY',
+      secretOrKey: jwtSecret,
     });
   }
 
   async validate(payload: any) {
-    const rolesMap = {
-      1: 'admin',
-      2: 'user',
+    // role_id: 1 = user ทั่วไป, 2 = admin (ตรงกับตาราง roles ใน DB)
+    const rolesMap: Record<number, string> = {
+      1: 'user',
+      2: 'admin',
     };
     const roleName = rolesMap[payload.role_id] || 'guest';
 
@@ -22,7 +28,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       userId: payload.sub,
       email: payload.email,
       role_id: payload.role_id ?? null,
-      role: roleName, // <--- เพิ่มตัวนี้ เพื่อส่งไปให้ RolesGuard ตรวจสอบ
+      role: roleName,
     };
   }
 }
