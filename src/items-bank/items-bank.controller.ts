@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, Req, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ItemsBankService } from './items-bank.service';
+import { IrtManagementService } from './irt-management.service';
 import { CreateItemsBankDto } from './dto/create-items-bank.dto';
 import { CreateSituationDto } from './dto/create-situation.dto';
 import { CreateItemsDto } from './dto/create-items.dto';
@@ -13,7 +14,10 @@ import { CreateBulkQuestionsDto } from './dto/create-bulk-questions.dto';
 @Roles(2)
 @Controller('items-bank')
 export class ItemsBankController {
-  constructor(private readonly itemsBankService: ItemsBankService) { }
+  constructor(
+    private readonly itemsBankService: ItemsBankService,
+    private readonly irtManagementService: IrtManagementService,
+  ) { }
 
   @Post()
   create(@Body() createItemsBankDto: CreateItemsBankDto) {
@@ -137,7 +141,7 @@ export class ItemsBankController {
    */
   @Get('cat/items-with-irt')
   getItemsWithIRT() {
-    return this.itemsBankService.getItemsWithIRTParameters();
+    return this.irtManagementService.getItemsWithIRTParameters();
   }
 
   /**
@@ -145,7 +149,7 @@ export class ItemsBankController {
    */
   @Get(':id/cat/items-with-irt')
   getItemBankItemsWithIRT(@Param('id') id: string) {
-    return this.itemsBankService.getItemBankItemsWithIRT(+id);
+    return this.irtManagementService.getItemBankItemsWithIRT(+id);
   }
 
   /**
@@ -153,7 +157,7 @@ export class ItemsBankController {
    */
   @Patch('cat/batch-update-irt')
   batchUpdateIRTParameters(@Body() updateData: any) {
-    return this.itemsBankService.batchUpdateIRTParameters(updateData);
+    return this.irtManagementService.batchUpdateIRTParameters(updateData);
   }
 
   /**
@@ -161,7 +165,7 @@ export class ItemsBankController {
    */
   @Get('cat/readiness-summary')
   getCATReadinessSummary() {
-    return this.itemsBankService.getCATReadinessSummary();
+    return this.irtManagementService.getCATReadinessSummary();
   }
 
   /**
@@ -169,6 +173,6 @@ export class ItemsBankController {
    */
   @Get(':id/dashboard')
   getDashboardStats(@Param('id') id: string) {
-    return this.itemsBankService.getDashboardStats(+id);
+    return this.irtManagementService.getDashboardStats(+id);
   }
 }

@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ItemsBankService } from './items-bank.service';
+import { ExamService } from './exam.service';
+import { IrtManagementService } from './irt-management.service';
 import { ItemsBankController } from './items-bank.controller';
 import { ExamController } from './exam.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -36,6 +38,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [ItemsBankController, ExamController],
-  providers: [ItemsBankService],
+  providers: [ItemsBankService, ExamService, IrtManagementService],
+  exports: [ExamService],
 })
-export class ItemsBankModule { }
+export class ItemsBankModule {}
