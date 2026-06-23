@@ -45,6 +45,9 @@ export class CreateItemsDto {
     @IsOptional()
     @IsNumber()
     sub_topic_id: number;
+
+    @IsOptional()
+    sub_topic_ids?: number[];
 }
 
 

@@ -359,7 +359,15 @@ export class ItemsBankService {
     await this.itemBankItemRepo.save(itemBankItem);
 
     // 4. Save ลงตาราง item_sub_topics (ถ้ามี)
-    if (createItemsDto.sub_topic_id) {
+    if (createItemsDto.sub_topic_ids && Array.isArray(createItemsDto.sub_topic_ids) && createItemsDto.sub_topic_ids.length > 0) {
+      const itemSubTopics = createItemsDto.sub_topic_ids.map(id =>
+        this.itemSubTopicRepo.create({
+          item_id: savedItem.item_id,
+          sub_topic_id: Number(id),
+        })
+      );
+      await this.itemSubTopicRepo.save(itemSubTopics);
+    } else if (createItemsDto.sub_topic_id) {
       const itemSubTopic = this.itemSubTopicRepo.create({
         item_id: savedItem.item_id,
         sub_topic_id: createItemsDto.sub_topic_id,
@@ -448,7 +456,7 @@ export class ItemsBankService {
       // 2. วนลูปสร้างแต่ละคำถาม
       for (let i = 0; i < questions.length; i++) {
         const questionData = questions[i];
-        const { answer_options, sub_topic_id, ...itemData } = questionData;
+        const { answer_options, sub_topic_id, sub_topic_ids, ...itemData } = questionData;
 
         // 2.1 สร้าง Item
         const item = queryRunner.manager.create(Item, {
@@ -475,7 +483,15 @@ export class ItemsBankService {
         }
 
         // 2.3 ถ้ามี sub_topic_id ให้สร้างความสัมพันธ์ใน item_sub_topics
-        if (sub_topic_id) {
+        if (sub_topic_ids && Array.isArray(sub_topic_ids) && sub_topic_ids.length > 0) {
+          const itemSubTopics = sub_topic_ids.map(id =>
+            queryRunner.manager.create(ItemSubTopic, {
+              item_id: savedItem.item_id,
+              sub_topic_id: Number(id),
+            })
+          );
+          await queryRunner.manager.save(itemSubTopics);
+        } else if (sub_topic_id) {
           const itemSubTopic = queryRunner.manager.create(ItemSubTopic, {
             item_id: savedItem.item_id,
             sub_topic_id,
@@ -543,7 +559,7 @@ export class ItemsBankService {
       // วนลูปสร้างแต่ละคำถาม
       for (let i = 0; i < questions.length; i++) {
         const questionData = questions[i];
-        const { answer_options, sub_topic_id, ...itemData } = questionData;
+        const { answer_options, sub_topic_id, sub_topic_ids, ...itemData } = questionData;
 
         // สร้าง Item
         const item = queryRunner.manager.create(Item, {
@@ -570,8 +586,16 @@ export class ItemsBankService {
           await queryRunner.manager.save(itemBankItem);
         }
 
-        // ถ้ามี sub_topic_id ให้สร้างความสัมพันธ์ใน item_sub_topics
-        if (sub_topic_id) {
+        // ถ้ามี sub_topic_id หรือ sub_topic_ids ให้สร้างความสัมพันธ์ใน item_sub_topics
+        if (sub_topic_ids && Array.isArray(sub_topic_ids) && sub_topic_ids.length > 0) {
+          const itemSubTopics = sub_topic_ids.map(id =>
+            queryRunner.manager.create(ItemSubTopic, {
+              item_id: savedItem.item_id,
+              sub_topic_id: Number(id),
+            })
+          );
+          await queryRunner.manager.save(itemSubTopics);
+        } else if (sub_topic_id) {
           const itemSubTopic = queryRunner.manager.create(ItemSubTopic, {
             item_id: savedItem.item_id,
             sub_topic_id,
@@ -911,13 +935,27 @@ export class ItemsBankService {
     }
 
     // แยกข้อมูลที่ไม่ใช่ของ item entity
-    const { sub_topic_id, answer_options, ...itemData } = updateData;
+    const { sub_topic_id, sub_topic_ids, answer_options, ...itemData } = updateData;
 
     // Update item
     await this.itemRepo.update({ item_id }, itemData);
 
-    // Update sub_topic ถ้ามีการเปลี่ยนแปลง
-    if (sub_topic_id !== undefined) {
+    // Update sub_topic หรือ sub_topic_ids ถ้ามีการเปลี่ยนแปลง
+    if (sub_topic_ids !== undefined) {
+      // ลบ sub_topic เก่า
+      await this.itemSubTopicRepo.delete({ item_id });
+
+      // เพิ่ม sub_topics ใหม่ทั้งหมด (ถ้ามี)
+      if (Array.isArray(sub_topic_ids) && sub_topic_ids.length > 0) {
+        const itemSubTopics = sub_topic_ids.map(id =>
+          this.itemSubTopicRepo.create({
+            item_id,
+            sub_topic_id: Number(id)
+          })
+        );
+        await this.itemSubTopicRepo.save(itemSubTopics);
+      }
+    } else if (sub_topic_id !== undefined) {
       // ลบ sub_topic เก่า
       await this.itemSubTopicRepo.delete({ item_id });
 
@@ -929,9 +967,7 @@ export class ItemsBankService {
         });
         await this.itemSubTopicRepo.save(itemSubTopic);
       }
-    }
-
-    // Update answer options ถ้ามี
+    }    // Update answer options ถ้ามี
     if (answer_options && Array.isArray(answer_options)) {
       // ดึงตัวเลือกคำตอบที่มีอยู่เดิม
       const existingOptions = await this.answerOptionRepo.find({ where: { item_id } });

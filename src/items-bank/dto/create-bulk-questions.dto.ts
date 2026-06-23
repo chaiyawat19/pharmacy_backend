@@ -50,6 +50,9 @@ export class QuestionDto {
     @IsNumber()
     sub_topic_id?: number;
 
+    @IsOptional()
+    sub_topic_ids?: number[];
+
     // Array ของ answer options สำหรับคำถามนี้
     @IsArray()
     @ValidateNested({ each: true })
