@@ -625,6 +625,7 @@ export class CATExamService {
             return {
                 ...resp,
                 question_text: item?.question_text,
+                question_image_url: item?.question_image_url,
                 explanation: item?.explanation,
                 situation: item?.situation,
                 answer_options: item?.answer_options,

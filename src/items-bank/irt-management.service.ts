@@ -35,6 +35,7 @@ export class IrtManagementService {
     return itemsWithIRT.map((bbi) => ({
       item_id: bbi.item.item_id,
       question_text: bbi.item.question_text,
+      question_image_url: bbi.item.question_image_url,
       irt_a_discrimination: bbi.item.irt_a_discrimination,
       irt_b_difficulty: bbi.item.irt_b_difficulty,
       irt_c_guessing: bbi.item.irt_c_guessing,
@@ -92,6 +93,7 @@ export class IrtManagementService {
       items: itemsWithIRT.map((bbi) => ({
         item_id: bbi.item.item_id,
         question_text: bbi.item.question_text,
+        question_image_url: bbi.item.question_image_url,
         irt_a_discrimination: bbi.item.irt_a_discrimination,
         irt_b_difficulty: bbi.item.irt_b_difficulty,
         irt_c_guessing: bbi.item.irt_c_guessing,
@@ -287,9 +289,19 @@ export class IrtManagementService {
     const recentActivity = recentActivityRaw.map((session) => ({
       session_id: session.session_id,
       user_id: session.userId,
-      user_name: session.user
-        ? `${session.user.first_name} ${session.user.last_name}`
-        : `User #${session.userId}`,
+      user_name: (() => {
+        if (!session.user) return `User #${session.userId}`;
+        const fName = (session.user.first_name || '').trim();
+        const lName = (session.user.last_name || '').trim();
+        if (!fName && !lName) return `User #${session.userId}`;
+        const maskedFirst = fName.length <= 2
+          ? (fName.charAt(0) || '*') + '*'.repeat(Math.max(1, fName.length - 1))
+          : fName.substring(0, 2) + '*'.repeat(Math.max(1, fName.length - 2));
+        const maskedLast = lName.length > 0
+          ? lName.charAt(0) + '*'.repeat(Math.max(1, lName.length - 1))
+          : '';
+        return maskedLast ? `${maskedFirst} ${maskedLast}` : maskedFirst;
+      })(),
       start_time: session.start_time,
       end_time: session.end_time,
       score: session.final_score,

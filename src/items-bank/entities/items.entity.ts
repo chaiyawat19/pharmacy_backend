@@ -49,6 +49,9 @@ export class Item {
     @Column({ type: 'varchar', length: 50, default: 'draft' })
     status: string;
 
+    @Column({ type: 'text', nullable: true })
+    question_image_url?: string;
+
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;

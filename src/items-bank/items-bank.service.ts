@@ -681,6 +681,7 @@ export class ItemsBankService {
         return {
           item_id: item.item_id,
           question_text: item.question_text,
+          question_image_url: item.question_image_url,
           explanation: item.explanation,
           status: item.status,
           display_order: itemBankItem.display_order,
@@ -1261,6 +1262,7 @@ export class ItemsBankService {
         return {
           item_id: r.item_id,
           question_text: item?.question_text,
+          question_image_url: item?.question_image_url,
           explanation: item?.explanation,
           selected_option_id: r.selected_option_id,
           correct_option_id: r.correct_option_id,
@@ -1902,7 +1904,19 @@ export class ItemsBankService {
     const recentActivity = recentActivityRaw.map(session => ({
       session_id: session.session_id,
       user_id: session.userId,
-      user_name: session.user ? `${session.user.first_name} ${session.user.last_name}` : `User #${session.userId}`,
+      user_name: (() => {
+        if (!session.user) return `User #${session.userId}`;
+        const fName = (session.user.first_name || '').trim();
+        const lName = (session.user.last_name || '').trim();
+        if (!fName && !lName) return `User #${session.userId}`;
+        const maskedFirst = fName.length <= 2
+          ? (fName.charAt(0) || '*') + '*'.repeat(Math.max(1, fName.length - 1))
+          : fName.substring(0, 2) + '*'.repeat(Math.max(1, fName.length - 2));
+        const maskedLast = lName.length > 0
+          ? lName.charAt(0) + '*'.repeat(Math.max(1, lName.length - 1))
+          : '';
+        return maskedLast ? `${maskedFirst} ${maskedLast}` : maskedFirst;
+      })(),
       start_time: session.start_time,
       end_time: session.end_time,
       score: session.final_score,

@@ -27,6 +27,10 @@ export class CreateItemsDto {
     explanation: string;
 
     @IsOptional()
+    @IsString()
+    question_image_url?: string;
+
+    @IsOptional()
     @IsNumber()
     irt_a_discrimination: number;
 

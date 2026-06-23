@@ -237,6 +237,7 @@ export class ExamService {
         return {
           item_id: r.item_id,
           question_text: item?.question_text,
+          question_image_url: item?.question_image_url,
           explanation: item?.explanation,
           selected_option_id: r.selected_option_id,
           correct_option_id: r.correct_option_id,
