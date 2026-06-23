@@ -38,12 +38,12 @@ import { ChatbotModule } from './chatbot/chatbot.module';
       {
         name: 'global',
         ttl: 60000,  // 1 นาที
-        limit: 60,   // 60 requests/นาที ต่อ IP (global)
+        limit: 300,  // 300 requests/นาที ต่อ IP (global)
       },
       {
         name: 'auth',
         ttl: 60000,  // 1 นาที
-        limit: 10,   // 10 requests/นาที สำหรับ auth endpoints
+        limit: 60,   // 60 requests/นาที สำหรับ auth endpoints
       },
     ]),
     TypeOrmModule.forRootAsync({
