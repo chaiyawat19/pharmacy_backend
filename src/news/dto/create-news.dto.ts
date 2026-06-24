@@ -1,10 +1,38 @@
+import { IsString, IsOptional, IsNumber, IsArray, IsNotEmpty } from 'class-validator';
+
 export class CreateNewsDto {
+  @IsString()
+  @IsNotEmpty({ message: 'กรุณาระบุหัวข้อข่าว' })
   title: string;
+
+  // 💡 สำหรับ content ที่เป็น any (หรือ Rich Text Object) 
+  // แนะนำให้ใส่ @IsNotEmpty() หรือ @IsOptional() ไว้ เพื่อให้ ValidationPipe รับรู้ตัวแปรนี้
+  @IsNotEmpty()
   content: any;
+
+  @IsString()
+  @IsOptional()
   excerpt?: string;
+
+  @IsNumber()
   author_id: number;
+
+  @IsString()
+  @IsOptional()
   cover_image_url?: string;
+
+  @IsString()
+  @IsOptional()
   status?: string;
+
+  // 💡 สำหรับอาร์เรย์ตัวเลข (เช่น [1, 2, 3]) ต้องระบุให้ชัดเจน เพื่อให้ระบบ transform ทำงานถูกตัว
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsOptional()
   categoryIds?: number[];
+
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsOptional()
   tagIds?: number[];
 }
