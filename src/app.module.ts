@@ -56,7 +56,7 @@ import { StudentProgressModule } from './student-progress/student-progress.modul
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_DATABASE'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: false, // ⚠️ ปิดไว้ก่อนเพราะติด Constraint ของ universities
+        synchronize: true, // ⚠️ เปิดไว้เพื่อให้ TypeORM สร้าง table ให้
         autoLoadEntities: true,
       }),
       inject: [ConfigService],
