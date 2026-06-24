@@ -22,11 +22,11 @@ export class ItemSituation {
     @JoinColumn({ name: 'item_bank_id' })
     item_bank: ItemsBank;
 
-    @Column({ type: 'text' })
-    situation_text: string;
+    @Column({ type: 'text', nullable: true })
+    situation_text?: string;
 
-    @Column({ type: 'text' })
-    situation_image_url: string;
+    @Column({ type: 'text', nullable: true })
+    situation_image_url?: string;
 
     @Column({ type: 'integer', default: 1 })
     display_order: number;
