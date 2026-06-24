@@ -57,7 +57,6 @@ import { StudentProgressModule } from './student-progress/student-progress.modul
         database: configService.get('DB_DATABASE'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: true, // ⚠️ เปิดไว้เพื่อให้ TypeORM สร้าง table ให้
-        dropSchema: true,
         autoLoadEntities: true,
       }),
       inject: [ConfigService],
