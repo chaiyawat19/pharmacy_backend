@@ -28,7 +28,7 @@ import { BookmarkModule } from './bookmark/bookmark.module';
 import { IrtModule } from './irt/irt.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
-
+import { StudentProgressModule } from './student-progress/student-progress.module';
 
 @Module({
   imports: [
@@ -37,13 +37,13 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     ThrottlerModule.forRoot([
       {
         name: 'global',
-        ttl: 60000,  // 1 นาที
-        limit: 300,  // 300 requests/นาที ต่อ IP (global)
+        ttl: 60000, // 1 นาที
+        limit: 300, // 300 requests/นาที ต่อ IP (global)
       },
       {
         name: 'auth',
-        ttl: 60000,  // 1 นาที
-        limit: 60,   // 60 requests/นาที สำหรับ auth endpoints
+        ttl: 60000, // 1 นาที
+        limit: 60, // 60 requests/นาที สำหรับ auth endpoints
       },
     ]),
     TypeOrmModule.forRootAsync({
@@ -79,6 +79,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     IrtModule,
     DashboardModule,
     ChatbotModule,
+    StudentProgressModule,
     UserDashboardModule,
   ],
   controllers: [AppController],
@@ -86,7 +87,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     AppService,
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,  // Rate limiting (ลำดับแรก)
+      useClass: ThrottlerGuard, // Rate limiting (ลำดับแรก)
     },
     {
       provide: APP_GUARD,
@@ -98,4 +99,4 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}
