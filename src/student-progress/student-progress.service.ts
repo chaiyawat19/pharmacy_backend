@@ -118,12 +118,31 @@ export class StudentProgressService {
       }),
     ]);
 
-    const completedCatSessions = catSessions.filter(
-      (session) => session.end_time,
-    );
-    const chart = completedCatSessions.map((session, index) => ({
+    // รวมข้อมูลทั้ง CAT และ Classical เป็นแนวโน้มเดียว
+    const allExamHistory = [
+      ...normalSessions.map((session) => ({
+        date: session.end_time ?? session.start_time,
+        type: 'Classical',
+        theta: this.scoreToTheta(session.final_score ?? 0),
+        score: session.final_score ?? 0,
+        name: session.item_bank?.bank_name ?? `Exam #${session.session_id}`,
+      })),
+      ...catSessions.map((session) => ({
+        date: session.end_time ?? session.start_time,
+        type: 'CAT',
+        theta: this.getCatTheta(session),
+        name:
+          session.base_session?.item_bank?.bank_name ??
+          `CAT #${session.session_id}`,
+      })),
+    ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    const chart = allExamHistory.map((exam, index) => ({
       attempt: `ครั้งที่ ${index + 1}`,
-      theta: this.roundTheta(this.getCatTheta(session)),
+      date: this.formatThaiDate(exam.date),
+      theta: this.roundTheta(exam.theta),
+      type: exam.type,
+      name: exam.name,
     }));
 
     const normalExams = normalSessions
@@ -151,11 +170,14 @@ export class StudentProgressService {
         };
       });
 
-    const catExams = completedCatSessions
+    const catExams = catSessions
       .slice()
       .sort((a, b) => b.start_time.getTime() - a.start_time.getTime())
       .map((session) => {
         const theta = this.roundTheta(this.getCatTheta(session));
+        const responses = Array.isArray(session.responses)
+          ? session.responses
+          : [];
 
         return {
           id: Number(session.session_id),
@@ -163,9 +185,17 @@ export class StudentProgressService {
             session.base_session?.item_bank?.bank_name ??
             `CAT Exam #${session.session_id}`,
           totalQuestions: session.num_items,
+          correctCount: session.num_correct,
           theta,
           status: this.getThetaStatus(theta),
           date: this.formatThaiDate(session.end_time ?? session.start_time),
+          responses: responses.map((r: any) => ({
+            itemId: r.item_id,
+            isCorrect: r.is_correct,
+            responseTime: r.response_time_ms,
+            thetaBefore: this.roundTheta(r.theta_before ?? 0),
+            thetaAfter: this.roundTheta(r.theta_after ?? 0),
+          })),
         };
       });
 
@@ -179,6 +209,18 @@ export class StudentProgressService {
       normalExams,
       catExams,
     };
+  }
+
+  /**
+   * แปลงคะแนน Classical (0-100) เป็น Theta equivalent
+   * โดยประมาณ: 50 = theta 0, 75 = theta 1, 25 = theta -1
+   */
+  private scoreToTheta(score: number): number {
+    // Linear transformation: theta = (score - 50) / 25
+    // score 0 → theta -2
+    // score 50 → theta 0
+    // score 100 → theta 2
+    return (score - 50) / 25;
   }
 
   private getCatTheta(session: CATSession) {

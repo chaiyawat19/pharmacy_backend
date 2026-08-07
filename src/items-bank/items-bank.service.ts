@@ -911,7 +911,7 @@ export class ItemsBankService {
     }
 
     // แยกข้อมูลที่ไม่ใช่ของ item entity
-    const { sub_topic_id, answer_options, ...itemData } = updateData;
+    const { sub_topic_id, sub_topic_ids, answer_options, ...itemData } = updateData;
 
     // Update item
     await this.itemRepo.update({ item_id }, itemData);
@@ -928,6 +928,23 @@ export class ItemsBankService {
           sub_topic_id: Number(sub_topic_id)
         });
         await this.itemSubTopicRepo.save(itemSubTopic);
+      }
+    }
+
+    // Update sub_topic_ids (รองรับหลาย sub_topic) ถ้ามี
+    if (sub_topic_ids !== undefined && Array.isArray(sub_topic_ids)) {
+      // ลบ sub_topic เก่าทั้งหมด
+      await this.itemSubTopicRepo.delete({ item_id });
+
+      // เพิ่ม sub_topic ใหม่ทั้งหมด
+      if (sub_topic_ids.length > 0) {
+        const itemSubTopics = sub_topic_ids.map(subTopicId =>
+          this.itemSubTopicRepo.create({
+            item_id,
+            sub_topic_id: Number(subTopicId)
+          })
+        );
+        await this.itemSubTopicRepo.save(itemSubTopics);
       }
     }
 

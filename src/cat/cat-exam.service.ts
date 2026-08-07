@@ -154,8 +154,8 @@ export class CATExamService {
             .leftJoinAndSelect('item.situation', 'situation')
             .where('item.irt_a_discrimination > 0')
             .andWhere('item.irt_b_difficulty IS NOT NULL')
-            .andWhere('item.irt_c_guessing IS NOT NULL')
-            .andWhere("item.status = 'published'");
+            .andWhere('item.irt_c_guessing IS NOT NULL');
+            // ลบเงื่อนไข status ออก เพื่อให้ข้อสอบที่มี IRT ครบใช้ได้ทันที
 
         if (itemBankId) {
             query
