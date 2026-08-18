@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Req,
   Body,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
@@ -87,6 +88,35 @@ export class AuthController {
       throw new Error('Google authentication failed');
     }
     const accessToken = await this.authService.socialLogin(req.user);
-    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/user`);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    // ส่ง token กลับ Frontend ผ่าน URL parameter
+    return res.redirect(`${frontendUrl}/auth/callback?token=${accessToken}`);
+  }
+
+  /** ตรวจสอบว่าอีเมลมีในระบบหรือยัง */
+  @Public()
+  @Get('check-email')
+  async checkEmail(@Body('email') email: string) {
+    const exists = await this.authService.checkEmailExists(email);
+    return { exists };
+  }
+
+  /** ส่ง OTP ไปยังอีเมล */
+  @Throttle({ auth: {} })
+  @Public()
+  @Post('send-otp')
+  async sendOTP(@Body('email') email: string) {
+    return this.authService.sendOTP(email);
+  }
+
+  /** ตรวจสอบ OTP */
+  @Public()
+  @Post('verify-otp')
+  async verifyOTP(@Body() body: { email: string; otp: string }) {
+    const isValid = await this.authService.verifyOTP(body.email, body.otp);
+    if (!isValid) {
+      throw new BadRequestException('รหัส OTP ไม่ถูกต้องหรือหมดอายุ');
+    }
+    return { message: 'OTP ถูกต้อง', valid: true };
   }
 }

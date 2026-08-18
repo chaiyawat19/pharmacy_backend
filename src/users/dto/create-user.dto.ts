@@ -42,4 +42,8 @@ export class CreateUserDto {
   @IsNotEmpty()
   @IsInt()
   university_id: number;
+
+  @IsOptional()
+  @IsString()
+  profile_picture?: string;
 }

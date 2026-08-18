@@ -77,12 +77,14 @@ export class UsersService {
     first_name: string;
     last_name: string;
     provider: 'google';
+    profile_picture?: string;
   }): Promise<User> {
     const user = this.userRepository.create({
       email: data.email,
       first_name: data.first_name,
       last_name: data.last_name,
       provider: data.provider,
+      profile_picture: data.profile_picture || null,
       role_id: 1,
       password: null,
     });

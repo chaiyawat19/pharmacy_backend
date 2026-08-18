@@ -12,6 +12,7 @@ import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class SchedulesService {
@@ -22,10 +23,13 @@ export class SchedulesService {
     private readonly scheduleRepo: Repository<Schedule>,
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
+    private readonly configService: ConfigService,
   ) {
-    this.genAI = new GoogleGenerativeAI(
-      'AIzaSyDY193ogKLZtP9iYoUkTysUxV3-JSUIEA0',
-    );
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not defined in environment variables');
+    }
+    this.genAI = new GoogleGenerativeAI(apiKey);
   }
   async extractEventsFromPdf(file: Express.Multer.File) {
     const maxRetries = 3;

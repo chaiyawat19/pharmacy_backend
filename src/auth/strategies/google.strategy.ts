@@ -6,10 +6,11 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor(config: ConfigService) {
+    const backendUrl = config.get<string>('BACKEND_URL') || 'http://localhost:5000';
     const options: StrategyOptions = {
       clientID: config.get<string>('GOOGLE_CLIENT_ID')!,
       clientSecret: config.get<string>('GOOGLE_CLIENT_SECRET')!,
-      callbackURL: `${process.env.NEXT_PUBLIC_API_URL}/auth/google/callback`,
+      callbackURL: `${backendUrl}/auth/google/callback`,
       scope: ['email', 'profile'],
     };
     super(options);
@@ -25,6 +26,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     // console.log('profile:', profile);
     // console.log('emails:', profile?.emails);
     // console.log('name:', profile?.name);
+    // console.log('photos:', profile?.photos);
     // console.log('================================');
 
     if (!profile?.emails?.length) {
@@ -35,6 +37,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       email: profile.emails[0].value,
       first_name: profile.name?.givenName,
       last_name: profile.name?.familyName,
+      profile_picture: profile.photos?.[0]?.value || null,
       provider: 'google',
     };
   }

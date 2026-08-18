@@ -38,4 +38,28 @@ export class MailService {
             throw new InternalServerErrorException('ไม่สามารถส่งอีเมลได้ในขณะนี้');
         }
     }
+
+    async sendOTP(email: string, otp: string) {
+        try {
+            await this.transporter.sendMail({
+                from: `"เภสัชพร้อมสอบ" <${process.env.MAIL_USER}>`,
+                to: email,
+                subject: 'รหัส OTP สำหรับสมัครสมาชิก - เภสัชพร้อมสอบ',
+                html: `
+          <div style="font-family: sans-serif; padding: 20px;">
+            <h2>สวัสดีครับ,</h2>
+            <p>รหัส OTP สำหรับยืนยันการสมัครสมาชิก:</p>
+            <div style="background-color: #f3f4f6; padding: 15px; border-radius: 5px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+              ${otp}
+            </div>
+            <p style="color: #ef4444;">⚠️ รหัสนี้จะหมดอายุใน 5 นาที</p>
+            <p>หากคุณไม่ได้เป็นผู้ร้องขอ กรุณาละทิ้งอีเมลฉบับนี้</p>
+          </div>
+        `,
+            });
+        } catch (error) {
+            console.error('OTP Mail Sending Error:', error);
+            throw new InternalServerErrorException('ไม่สามารถส่ง OTP ได้ในขณะนี้');
+        }
+    }
 }
