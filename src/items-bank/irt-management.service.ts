@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Item } from './entities/items.entity';
@@ -7,7 +7,7 @@ import { ItemsBank } from './entities/items-bank.entity';
 import { ExamSession } from './entities/exam-session.entity';
 
 @Injectable()
-export class IrtManagementService {
+export class IrtManagementService implements OnModuleInit {
   constructor(
     @InjectRepository(Item)
     private readonly itemRepo: Repository<Item>,
@@ -19,10 +19,29 @@ export class IrtManagementService {
     private readonly examSessionRepo: Repository<ExamSession>,
   ) {}
 
+  async onModuleInit() {
+    try {
+      // Auto-set default IRT values (a=1.0, b=0.0, c=0.20) for any legacy or imported items missing valid IRT
+      await this.itemRepo
+        .createQueryBuilder()
+        .update(Item)
+        .set({
+          irt_a_discrimination: 1.0,
+          irt_b_difficulty: 0.0,
+          irt_c_guessing: 0.20,
+        })
+        .where('irt_a_discrimination IS NULL OR irt_a_discrimination <= 0 OR irt_b_difficulty IS NULL OR irt_c_guessing IS NULL')
+        .execute();
+    } catch (err) {
+      console.warn('Failed to auto-set default IRT parameters:', err);
+    }
+  }
+
   // ==================== IRT / CAT Methods ====================
 
   /**
    * ดึงข้อสอบทั้งหมดที่มี IRT parameters ครบ พร้อมข้อมูล item bank
+   * (legacy — ใช้โดย endpoint เดิม)
    */
   async getItemsWithIRTParameters() {
     const allItemBankItems = await this.itemBankItemRepo.find({
@@ -43,6 +62,50 @@ export class IrtManagementService {
       status: bbi.item.status,
       display_order: bbi.display_order,
       situation: bbi.item.situation
+        ? {
+            situation_id: bbi.item.situation.situation_id,
+            situation_text: bbi.item.situation.situation_text,
+            situation_image_url: bbi.item.situation.situation_image_url,
+          }
+        : null,
+      item_bank: {
+        item_bank_id: bbi.item_bank.item_bank_id,
+        bank_name: bbi.item_bank.bank_name,
+        description: bbi.item_bank.description,
+      },
+      answer_options: bbi.item.answer_options?.map((opt) => ({
+        option_id: opt.option_id,
+        option_text: opt.option_text,
+        is_correct: opt.is_correct,
+      })),
+    }));
+  }
+
+  /**
+   * ดึงข้อสอบ **ทั้งหมด** (ทั้งที่มี IRT และยังไม่มี) สำหรับหน้า CAT Management
+   * ข้อที่ยังไม่ได้ตั้งค่าจะ return irt_* เป็น null
+   */
+  async getAllItemsForCATManagement() {
+    const allItemBankItems = await this.itemBankItemRepo.find({
+      relations: ['item', 'item.answer_options', 'item.situation', 'item_bank'],
+      order: { item_bank_id: 'ASC', display_order: 'ASC' },
+    });
+
+    return allItemBankItems.map((bbi) => ({
+      item_id: bbi.item.item_id,
+      question_text: bbi.item.question_text,
+      question_image_url: bbi.item.question_image_url,
+      irt_a_discrimination: (bbi.item.irt_a_discrimination && bbi.item.irt_a_discrimination > 0) ? bbi.item.irt_a_discrimination : 1.0,
+      irt_b_difficulty: bbi.item.irt_b_difficulty ?? 0.0,
+      irt_c_guessing: bbi.item.irt_c_guessing ?? 0.20,
+      irt_calibrated: this.isValidIRTItem(bbi.item),
+      explanation: bbi.item.explanation,
+      status: bbi.item.status,
+      display_order: bbi.display_order,
+      situation: (bbi.item.situation && (
+        (bbi.item.situation.situation_text && bbi.item.situation.situation_text.replace(/<[^>]*>/g, '').trim() !== '') ||
+        (bbi.item.situation.situation_image_url && bbi.item.situation.situation_image_url.trim() !== '')
+      ))
         ? {
             situation_id: bbi.item.situation.situation_id,
             situation_text: bbi.item.situation.situation_text,

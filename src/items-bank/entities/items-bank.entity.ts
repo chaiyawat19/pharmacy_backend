@@ -4,6 +4,7 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
 } from 'typeorm';
 
 @Entity('item_banks')
@@ -28,4 +29,7 @@ export class ItemsBank {
 
   @UpdateDateColumn({ type: 'timestamp with time zone' })
   updated_at: Date;
+
+  @DeleteDateColumn({ type: 'timestamp with time zone', nullable: true })
+  deleted_at: Date | null;
 }

@@ -28,6 +28,9 @@ export class AnswerOption {
     @Column({ type: 'boolean' })
     is_correct: boolean;
 
+    @Column({ type: 'text', nullable: true })
+    option_image_url?: string | null;
+
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;
 

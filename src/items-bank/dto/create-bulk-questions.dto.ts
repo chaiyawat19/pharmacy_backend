@@ -11,24 +11,40 @@ import { Type } from 'class-transformer';
 
 // DTO สำหรับ Answer Option แต่ละตัว
 export class AnswerOptionDto {
-    @IsNotEmpty()
+    @IsOptional()
+    @IsNumber()
+    option_id?: number;
+
+    @IsOptional()
+    @IsNumber()
+    item_id?: number;
+
+    @IsOptional()
     @IsString()
-    option_text: string;
+    option_text?: string;
 
     @IsNotEmpty()
     @IsBoolean()
     is_correct: boolean;
+
+    @IsOptional()
+    @IsString()
+    option_image_url?: string;
 }
 
 // DTO สำหรับ Item/Question แต่ละข้อ
 export class QuestionDto {
-    @IsNotEmpty()
-    @IsString()
-    question_text: string;
+    @IsOptional()
+    @IsNumber()
+    item_id?: number;
 
     @IsOptional()
     @IsString()
-    explanation: string;
+    question_text?: string;
+
+    @IsOptional()
+    @IsString()
+    explanation?: string;
 
     @IsOptional()
     @IsString()
@@ -51,6 +67,7 @@ export class QuestionDto {
     sub_topic_id?: number;
 
     @IsOptional()
+    @IsArray()
     sub_topic_ids?: number[];
 
     // Array ของ answer options สำหรับคำถามนี้
@@ -62,14 +79,18 @@ export class QuestionDto {
 
 // DTO หลักสำหรับบันทึกทั้งหมด
 export class CreateBulkQuestionsDto {
+    @IsOptional()
+    @IsNumber()
+    situation_id?: number;
+
     @IsNotEmpty()
     @IsNumber()
     item_bank_id: number;
 
     // ข้อมูล Situation
-    @IsNotEmpty()
+    @IsOptional()
     @IsString()
-    situation_text: string;
+    situation_text?: string;
 
     @IsOptional()
     @IsString()

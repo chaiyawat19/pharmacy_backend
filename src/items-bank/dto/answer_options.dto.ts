@@ -2,7 +2,8 @@ import {
   IsNotEmpty,
   IsString,
   IsNumber,
-  IsBoolean
+  IsBoolean,
+  IsOptional
 } from 'class-validator';
 
 export class CreateAnswerOptionDto {
@@ -10,14 +11,17 @@ export class CreateAnswerOptionDto {
     @IsNumber()
     item_id: number;
 
-    @IsNotEmpty()
+    @IsOptional()
     @IsString()
-    option_text: string;
+    option_text?: string;
 
     @IsNotEmpty()
     @IsBoolean()
     is_correct: boolean;
 
+    @IsOptional()
+    @IsString()
+    option_image_url?: string;
 }
 
 

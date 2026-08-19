@@ -4,6 +4,7 @@ import {
     PrimaryGeneratedColumn,
     CreateDateColumn,
     UpdateDateColumn,
+    DeleteDateColumn,
     ManyToOne,
     JoinColumn
 } from 'typeorm';
@@ -23,10 +24,10 @@ export class ItemSituation {
     item_bank: ItemsBank;
 
     @Column({ type: 'text', nullable: true })
-    situation_text?: string;
+    situation_text?: string | null;
 
     @Column({ type: 'text', nullable: true })
-    situation_image_url?: string;
+    situation_image_url?: string | null;
 
     @Column({ type: 'integer', default: 1 })
     display_order: number;
@@ -36,4 +37,7 @@ export class ItemSituation {
 
     @UpdateDateColumn({ type: 'timestamp with time zone' })
     updated_at: Date;
+
+    @DeleteDateColumn({ type: 'timestamp with time zone', nullable: true })
+    deleted_at: Date | null;
 }

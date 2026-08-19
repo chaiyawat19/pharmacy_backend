@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ItemsBankService } from './items-bank.service';
+import { ItemsBankImportService } from './items-bank-import.service';
 import { ExamService } from './exam.service';
 import { IrtManagementService } from './irt-management.service';
 import { ItemsBankController } from './items-bank.controller';
@@ -17,7 +18,10 @@ import { UserItemMastery } from './entities/user_item_mastery.entity';
 import { User } from '../users/entities/user.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { CATSession } from '../cat/entities/cat-session.entity';
+import { Topic } from '../topics/entities/topic.entity';
+import { SubTopic } from '../topics/entities/sub-topics.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
@@ -34,11 +38,14 @@ import { NotificationsModule } from '../notifications/notifications.module';
       CATSession,
       User,
       Notification,
+      Topic,
+      SubTopic,
     ]),
     NotificationsModule,
+    CommonModule,
   ],
   controllers: [ItemsBankController, ExamController],
-  providers: [ItemsBankService, ExamService, IrtManagementService],
+  providers: [ItemsBankService, ItemsBankImportService, ExamService, IrtManagementService],
   exports: [ExamService],
 })
 export class ItemsBankModule {}

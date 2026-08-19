@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, Req, Query, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ItemsBankService } from './items-bank.service';
+import { ItemsBankImportService } from './items-bank-import.service';
 import { IrtManagementService } from './irt-management.service';
 import { CreateItemsBankDto } from './dto/create-items-bank.dto';
 import { CreateSituationDto } from './dto/create-situation.dto';
@@ -8,6 +9,7 @@ import { CreateItemsDto } from './dto/create-items.dto';
 import { ReorderItemsDto } from './dto/reorder-items.dto';
 import { UpdateItemsBankDto } from './dto/update-items-bank.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { Public } from 'src/common/decorators/public.decorator';
 import { CreateAnswerOptionDto } from './dto/answer_options.dto';
 import { CreateBulkQuestionsDto } from './dto/create-bulk-questions.dto';
 
@@ -16,6 +18,7 @@ import { CreateBulkQuestionsDto } from './dto/create-bulk-questions.dto';
 export class ItemsBankController {
   constructor(
     private readonly itemsBankService: ItemsBankService,
+    private readonly itemsBankImportService: ItemsBankImportService,
     private readonly irtManagementService: IrtManagementService,
   ) { }
 
@@ -24,11 +27,16 @@ export class ItemsBankController {
     return this.itemsBankService.createBank(createItemsBankDto);
   }
 
+  /**
+   * รายการชุดข้อสอบ — เปิดให้ guest เข้าดูได้ (เฉพาะ metadata ไม่มีเฉลย)
+   */
+  @Public()
   @Get()
   getBank() {
     return this.itemsBankService.getBank();
   }
 
+  @Public()
   @Get('search')
   search(@Query('q') query: string) {
     return this.itemsBankService.searchBanks(query);
@@ -149,6 +157,38 @@ export class ItemsBankController {
     return this.itemsBankService.addQuestionsFromPdf(+id, file);
   }
 
+  @Post(':id/import-excel')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      fileFilter: (req, file, cb) => {
+        const allowedMimeTypes = [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'application/octet-stream',
+        ];
+        const isExcel = allowedMimeTypes.includes(file.mimetype) || file.originalname.match(/\.(xlsx|xls)$/i);
+        if (!isExcel) {
+          return cb(
+            new BadRequestException('รองรับเฉพาะไฟล์ Excel (.xlsx, .xls) เท่านั้น'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB max สำหรับ Excel รวมรูปฝัง
+        files: 1,
+      },
+    }),
+  )
+  importExcel(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.itemsBankImportService.importExcelToBank(+id, file);
+  }
+
+
   // ==================== CAT Management Endpoints ====================
 
   /**
@@ -157,6 +197,14 @@ export class ItemsBankController {
   @Get('cat/items-with-irt')
   getItemsWithIRT() {
     return this.irtManagementService.getItemsWithIRTParameters();
+  }
+
+  /**
+   * ดึงข้อสอบทั้งหมด (ทั้งที่มี IRT และยังไม่มี) สำหรับหน้า CAT Management
+   */
+  @Get('cat/all-items')
+  getAllItemsForCAT() {
+    return this.irtManagementService.getAllItemsForCATManagement();
   }
 
   /**

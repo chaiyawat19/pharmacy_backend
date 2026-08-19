@@ -8,7 +8,7 @@ async function seed() {
   try {
     await client.connect();
     console.log('--- Seeding notification_types ---');
-    
+
     const types = [
       { id: 1, code: 'calendar', desc: 'กำหนดการ/ปฏิทิน', icon: 'Calendar' },
       { id: 2, code: 'news', desc: 'ข่าวสารประกาศ', icon: 'Newspaper' },

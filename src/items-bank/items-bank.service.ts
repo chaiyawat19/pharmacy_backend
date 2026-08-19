@@ -24,6 +24,7 @@ import { CATSession } from '../cat/entities/cat-session.entity';
 import { User } from '../users/entities/user.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { NameUniquenessService } from '../common/name-uniqueness.service';
 
 @Injectable()
 export class ItemsBankService {
@@ -55,6 +56,7 @@ export class ItemsBankService {
     private readonly notificationsGateway: NotificationsGateway,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
+    private readonly nameUniquenessService: NameUniquenessService,
   ) {
     this.genAI = new GoogleGenerativeAI(this.configService.get<string>('GEMINI_API_KEY') || '');
   }
@@ -62,6 +64,22 @@ export class ItemsBankService {
   private genAI: GoogleGenerativeAI;
 
   async createBank(createItemsBankDto: CreateItemsBankDto) {
+    // Check name uniqueness across all entities
+    const uniquenessCheck = await this.nameUniquenessService.checkNameUniqueness(
+      createItemsBankDto.bank_name,
+      'itembank'
+    );
+
+    if (uniquenessCheck.exists) {
+      throw new BadRequestException(
+        `ชื่อ "${createItemsBankDto.bank_name}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+      );
+    }
+
+    if (createItemsBankDto.is_active) {
+      throw new BadRequestException('ต้องมีอย่างน้อย 1 คำถาม/สถานการณ์ ถึงจะสามารถเปิดใช้งานชุดข้อสอบได้');
+    }
+
     const { category_ids, ...bankData } = createItemsBankDto;
 
     // สร้าง item bank
@@ -134,9 +152,9 @@ export class ItemsBankService {
           explanation: qData.explanation || '',
           situation_id: savedSituation.situation_id,
           status: 'ACTIVE',
-          irt_a_discrimination: 0,
-          irt_b_difficulty: 0,
-          irt_c_guessing: 0,
+          irt_a_discrimination: 1.0,
+          irt_b_difficulty: 0.0,
+          irt_c_guessing: 0.20,
         });
         const savedItem = await queryRunner.manager.save(item);
 
@@ -432,19 +450,24 @@ export class ItemsBankService {
     try {
       const { item_bank_id, situation_text, situation_image_url, questions } = createBulkQuestionsDto;
 
-      // 1. สร้าง Situation
-      // นับจำนวนสถานการณ์ที่มีอยู่แล้วเพื่อกำหนด display_order
-      const existingSituationsCount = await queryRunner.manager.count(ItemSituation, {
-          where: { item_bank_id },
-      });
+      // 1. สร้าง Situation (เฉพาะเมื่อมีข้อความหรือรูปภาพสถานการณ์)
+      let savedSituation: ItemSituation | null = null;
+      const cleanSitText = situation_text ? situation_text.replace(/<[^>]*>/g, '').trim() : '';
+      const cleanSitImg = situation_image_url ? situation_image_url.trim() : '';
 
-      const situation = queryRunner.manager.create(ItemSituation, {
-        item_bank_id,
-        situation_text,
-        situation_image_url: situation_image_url || '',
-        display_order: existingSituationsCount + 1,
-      });
-      const savedSituation = await queryRunner.manager.save(situation);
+      if (cleanSitText || cleanSitImg) {
+        const existingSituationsCount = await queryRunner.manager.count(ItemSituation, {
+            where: { item_bank_id },
+        });
+
+        const situation = queryRunner.manager.create(ItemSituation, {
+          item_bank_id,
+          situation_text: situation_text || '',
+          situation_image_url: situation_image_url || '',
+          display_order: existingSituationsCount + 1,
+        });
+        savedSituation = await queryRunner.manager.save(situation);
+      }
 
       const savedItems: Item[] = [];
 
@@ -461,10 +484,10 @@ export class ItemsBankService {
         // 2.1 สร้าง Item
         const item = queryRunner.manager.create(Item, {
           ...itemData,
-          situation_id: savedSituation.situation_id,
-          irt_a_discrimination: itemData.irt_a_discrimination || 0,
-          irt_b_difficulty: itemData.irt_b_difficulty || 0,
-          irt_c_guessing: itemData.irt_c_guessing || 0,
+          situation_id: savedSituation ? savedSituation.situation_id : null,
+          irt_a_discrimination: itemData.irt_a_discrimination ?? 1.0,
+          irt_b_difficulty: itemData.irt_b_difficulty ?? 0.0,
+          irt_c_guessing: itemData.irt_c_guessing ?? 0.20,
         });
         const savedItem = await queryRunner.manager.save(item);
 
@@ -506,6 +529,7 @@ export class ItemsBankService {
             item_id: savedItem.item_id,
             option_text: answerData.option_text,
             is_correct: answerData.is_correct,
+            option_image_url: answerData.option_image_url || null,
           });
           await queryRunner.manager.save(answerOption);
         }
@@ -565,9 +589,9 @@ export class ItemsBankService {
         const item = queryRunner.manager.create(Item, {
           ...itemData,
           situation_id: situation_id,
-          irt_a_discrimination: itemData.irt_a_discrimination || 0,
-          irt_b_difficulty: itemData.irt_b_difficulty || 0,
-          irt_c_guessing: itemData.irt_c_guessing || 0,
+          irt_a_discrimination: itemData.irt_a_discrimination ?? 1.0,
+          irt_b_difficulty: itemData.irt_b_difficulty ?? 0.0,
+          irt_c_guessing: itemData.irt_c_guessing ?? 0.20,
         });
         const savedItem = await queryRunner.manager.save(item);
 
@@ -610,6 +634,7 @@ export class ItemsBankService {
             item_id: savedItem.item_id,
             option_text: answerData.option_text,
             is_correct: answerData.is_correct,
+            option_image_url: answerData.option_image_url || null,
           });
           await queryRunner.manager.save(answerOption);
         }
@@ -663,26 +688,9 @@ export class ItemsBankService {
       relations: ['item', 'item.situation'],
     });
 
-    // เรียงลำดับ: 
-    // 1. เรียงตาม display_order ของ situation (ถ้าไม่มีให้ใช้ 0)
-    // 2. ถ้า display_order เท่ากัน ให้เรียงตาม situation_id (เพื่อรองรับข้อมูลเก่าที่ยังไม่ได้จัดลำดับ)
-    // 3. ถ้าอยู่ situation เดียวกัน ให้เรียงตาม display_order ของ item_bank_items
+    // เรียงลำดับคำถามตาม display_order ในชุดข้อสอบ
     itemBankItems.sort((a, b) => {
-      const sitOrderA = a.item?.situation?.display_order ?? 0;
-      const sitOrderB = b.item?.situation?.display_order ?? 0;
-
-      if (sitOrderA !== sitOrderB) {
-        return sitOrderA - sitOrderB;
-      }
-
-      const sitIdA = a.item?.situation_id ?? 0;
-      const sitIdB = b.item?.situation_id ?? 0;
-
-      if (sitIdA !== sitIdB) {
-        return sitIdA - sitIdB;
-      }
-
-      return a.display_order - b.display_order;
+      return (a.display_order ?? 0) - (b.display_order ?? 0);
     });
 
     // ดึงข้อมูลเพิ่มเติมสำหรับแต่ละคำถาม
@@ -723,7 +731,8 @@ export class ItemsBankService {
           answer_options: answerOptions.map(option => ({
             option_id: option.option_id,
             option_text: option.option_text,
-            is_correct: option.is_correct
+            is_correct: option.is_correct,
+            option_image_url: option.option_image_url
           })),
           sub_topics: itemSubTopics.map(ist => ({
             sub_topic_id: ist.sub_topic.sub_topic_id,
@@ -776,6 +785,18 @@ export class ItemsBankService {
     const { category_ids, ...bankData } = updateItemsBankDto;
     const oldBank = await this.bankRepo.findOneBy({ item_bank_id: id });
 
+    if (bankData.is_active) {
+      const totalItems = await this.itemBankItemRepo.count({
+        where: { item_bank_id: id },
+      });
+      const totalSituations = await this.situationRepo.count({
+        where: { item_bank_id: id },
+      });
+      if (totalItems === 0 && totalSituations === 0) {
+        throw new BadRequestException('ต้องมีอย่างน้อย 1 คำถาม/สถานการณ์ ถึงจะสามารถเปิดใช้งานชุดข้อสอบได้');
+      }
+    }
+
     // Update bank data
     await this.bankRepo.update({ item_bank_id: id }, bankData);
 
@@ -819,37 +840,24 @@ export class ItemsBankService {
     await queryRunner.startTransaction();
 
     try {
-      // 1. หา Sessions ทั้งหมดที่เกี่ยวข้องกับ Bank นี้
-      const sessions = await this.examSessionRepo.find({ where: { itemBankId: id } });
-      const sessionIds = sessions.map(s => s.session_id);
-
-      // 2. ลบ Exam Sessions
-      if (sessionIds.length > 0) {
-        await this.examSessionRepo.delete({ itemBankId: id });
-      }
-
-      // 4. ลบความสัมพันธ์อื่นๆ
+      // 1. ลบความสัมพันธ์อื่นๆ ของ Item Bank
       await this.itemBankCategoryRepo.delete({ item_bank_id: id });
       await this.itemBankItemRepo.delete({ item_bank_id: id });
 
-      // 4.5 ลบ Situations ที่ผูกกับ Item Bank นี้ (ซึ่งจะลบ Items ภายใต้ Situation นั้นด้วย)
+      // 2. Soft Delete Situations และ Items ภายใต้ Item Bank นี้
       const situations = await this.situationRepo.find({ where: { item_bank_id: id } });
       for (const situation of situations) {
-        // ใช้ logic เดียวกับ deleteSituation แต่เขียนใหม่ใน transaction นี้เพื่อให้ rollback ได้ถ้าพลาด
         const itemsInSituation = await this.itemRepo.find({ where: { situation_id: situation.situation_id } });
 
         for (const item of itemsInSituation) {
-          await this.answerOptionRepo.delete({ item_id: item.item_id });
-          await this.itemSubTopicRepo.delete({ item_id: item.item_id });
-          await this.itemBankItemRepo.delete({ item_id: item.item_id });
-          await this.itemRepo.delete({ item_id: item.item_id });
+          await queryRunner.manager.softDelete(Item, { item_id: item.item_id });
         }
 
-        await this.situationRepo.delete({ situation_id: situation.situation_id });
+        await queryRunner.manager.softDelete(ItemSituation, { situation_id: situation.situation_id });
       }
 
-      // 5. ลบ Item Bank
-      const result = await this.bankRepo.delete({ item_bank_id: id });
+      // 3. Soft Delete Item Bank
+      const result = await queryRunner.manager.softDelete(ItemsBank, { item_bank_id: id });
 
       await queryRunner.commitTransaction();
 
@@ -874,26 +882,13 @@ export class ItemsBankService {
       // หาคำถามทั้งหมดในสถานการณ์นี้
       const items = await this.itemRepo.find({ where: { situation_id } });
 
-      // ลบคำถามแต่ละข้อพร้อมข้อมูลที่เกี่ยวข้อง
+      // Soft Delete คำถามแต่ละข้อในสถานการณ์นี้
       for (const item of items) {
-        // ลบ answer options
-        await queryRunner.manager.delete(AnswerOption, { item_id: item.item_id });
-
-        // ลบ item_sub_topics
-        await queryRunner.manager.delete(ItemSubTopic, { item_id: item.item_id });
-
-        // ลบ item_bank_items
-        await queryRunner.manager.delete(ItemBankItem, { item_id: item.item_id });
-
-        // ลบ user_item_mastery (ประวัติการทำข้อสอบของผู้ใช้ในแต่ละข้อ)
-        await queryRunner.manager.delete(UserItemMastery, { item_id: item.item_id });
-
-        // ลบ item
-        await queryRunner.manager.delete(Item, { item_id: item.item_id });
+        await queryRunner.manager.softDelete(Item, { item_id: item.item_id });
       }
 
-      // ลบสถานการณ์
-      const result = await queryRunner.manager.delete(ItemSituation, { situation_id });
+      // Soft Delete สถานการณ์
+      const result = await queryRunner.manager.softDelete(ItemSituation, { situation_id });
 
       await queryRunner.commitTransaction();
 
@@ -992,7 +987,8 @@ export class ItemsBankService {
             { option_id: option.option_id },
             {
               option_text: option.option_text,
-              is_correct: option.is_correct
+              is_correct: option.is_correct,
+              option_image_url: option.option_image_url || null
             }
           );
         } else {
@@ -1000,7 +996,8 @@ export class ItemsBankService {
           const newOption = this.answerOptionRepo.create({
             item_id,
             option_text: option.option_text,
-            is_correct: option.is_correct
+            is_correct: option.is_correct,
+            option_image_url: option.option_image_url || null
           });
           await this.answerOptionRepo.save(newOption);
         }
@@ -1014,14 +1011,8 @@ export class ItemsBankService {
   }
 
   /**
-   * ลบคำถาม (Item) ออกจากระบบ
-   * จะลบข้อมูลที่เกี่ยวข้องทั้งหมด:
-   * - Exam responses (ประวัติการตอบ)
-   * - Answer options
-   * - Item sub topics
-   * - Item bank items (ความสัมพันธ์กับ item bank)
-   * - User item mastery (สถิติการตอบของผู้ใช้)
-   * - Item เอง
+   * ลบคำถาม (Item) แบบ Soft Delete
+   * เพื่อรักษาสถิติการตอบของผู้ใช้ (user_item_mastery) และประวัติการทำข้อสอบไว้
    */
   async deleteItem(item_id: number) {
     const item = await this.itemRepo.findOne({ where: { item_id } });
@@ -1030,17 +1021,8 @@ export class ItemsBankService {
       throw new NotFoundException(`ไม่พบคำถาม ID ${item_id}`);
     }
 
-    // ลบข้อมูลที่เกี่ยวข้อง (ต้องลบตามลำดับ foreign key)
-    // 2. ลบข้อมูลอื่นๆ (exam_responses อยู่ใน session JSONB แล้ว ไม่ต้องลบแยก)
-
-    // 2. ลบข้อมูลอื่นๆ
-    await this.answerOptionRepo.delete({ item_id });
-    await this.itemSubTopicRepo.delete({ item_id });
-    await this.itemBankItemRepo.delete({ item_id });
-    await this.userItemMasteryRepo.delete({ item_id });
-
-    // 3. ลบคำถาม
-    const result = await this.itemRepo.delete({ item_id });
+    // Soft Delete ตัวคำถาม (TypeORM จะเติม timestamp ใน deleted_at)
+    const result = await this.itemRepo.softDelete({ item_id });
 
     return {
       message: (result.affected ?? 0) > 0 ? 'ลบคำถามสำเร็จ' : 'ไม่พบคำถามที่ต้องการลบ',

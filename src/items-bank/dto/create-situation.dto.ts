@@ -10,9 +10,9 @@ export class CreateSituationDto {
     @IsNumber()
     item_bank_id: number;
 
-    @IsNotEmpty()
+    @IsOptional()
     @IsString()
-    situation_text: string;
+    situation_text?: string;
 
     @IsOptional()
     @IsString()
