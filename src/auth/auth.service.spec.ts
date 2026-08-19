@@ -3,6 +3,8 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { MailService } from '../mail/mail.service';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { OTP } from './entities/otp.entity';
 import { UnauthorizedException, BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { User } from '../users/entities/user.entity';
@@ -65,6 +67,17 @@ describe('AuthService', () => {
           provide: MailService,
           useValue: {
             sendResetPassword: jest.fn(),
+            sendOtpEmail: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(OTP),
+          useValue: {
+            findOne: jest.fn(),
+            create: jest.fn().mockImplementation((dto) => dto),
+            save: jest.fn().mockImplementation((otp) => Promise.resolve(otp)),
+            update: jest.fn().mockResolvedValue({ affected: 1 }),
+            delete: jest.fn().mockResolvedValue({ affected: 1 }),
           },
         },
       ],
