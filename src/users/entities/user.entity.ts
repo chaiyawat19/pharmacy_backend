@@ -61,6 +61,9 @@ export class User {
   })
   provider: 'local' | 'google';
 
+  @Column({ type: 'text', nullable: true })
+  profile_picture: string | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   reset_password_token: string | null;
 

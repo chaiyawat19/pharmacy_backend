@@ -25,58 +25,98 @@ export class SchedulesService {
     private readonly usersService: UsersService,
     private readonly nameUniquenessService: NameUniquenessService,
   ) {
-    this.genAI = new GoogleGenerativeAI(
-      'AIzaSyDY193ogKLZtP9iYoUkTysUxV3-JSUIEA0',
-    );
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not defined in environment variables');
+    }
+    this.genAI = new GoogleGenerativeAI(apiKey);
   }
   async extractEventsFromPdf(file: Express.Multer.File) {
-    try {
-      const model = this.genAI.getGenerativeModel({
-        model: 'gemini-2.5-flash',
-      });
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 วินาที
 
-      const prompt = `ดึงข้อมูลกำหนดการจาก PDF นี้และตอบกลับเป็น JSON Array เท่านั้น
-      ห้ามอธิบายเพิ่มเติม ห้ามใส่ Markdown
-      
-      เงื่อนไขสำคัญสำหรับ type_event:
-      - ถ้าเนื้อหาเกี่ยวข้องกับ PLE-IP1 หรือ PC1 หรือ PHCP1 ให้บันทึกค่าใน Array เป็น "PLE-IP1, PC1, PHCP1" (ก้อนเดียว)
-      - หลักสูตรอื่นๆ ให้ระบุแยกตามปกติ
-      
-      โครงสร้าง JSON: [{ "title": "...", "description": "...", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "type_event": ["PLE-IP1, PC1, PHCP1"] }]`;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const model = this.genAI.getGenerativeModel({
+          model: 'gemini-2.5-flash',
+        });
 
-      const result = await model.generateContent([
-        { text: prompt },
-        {
-          inlineData: {
-            data: file.buffer.toString('base64'),
-            mimeType: 'application/pdf',
+        const prompt = `ดึงข้อมูลกำหนดการจาก PDF นี้และตอบกลับเป็น JSON Array เท่านั้น
+        ห้ามอธิบายเพิ่มเติม ห้ามใส่ Markdown
+
+        **กฎสำคัญสำหรับ title:**
+        - title ต้องไม่เป็นค่าว่าง ห้ามเว้นว่าง
+        - ถ้ามีหัวข้อหลักด้านบนของตาราง (เช่น "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 4/2569 [การสอบสมรรถนะร่วม]") ให้นำมาใส่ใน title ของทุกรายการที่อยู่ภายใต้หัวข้อนั้น
+        - ถ้าแต่ละรายการมีชื่อกิจกรรมเฉพาะ ให้รวมกับหัวข้อหลัก เช่น "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 4/2569 - วันสอบ PLE-IP1"
+        - ถ้าไม่มีข้อมูลชื่อเลย ให้ใช้ description หรือวันที่มาตั้งชื่อแทน
+
+        เงื่อนไขสำคัญสำหรับ type_event:
+        - ถ้าเนื้อหาเกี่ยวข้องกับ PLE-IP1 หรือ PC1 หรือ PHCP1 ให้บันทึกค่าใน Array เป็น "PLE-IP1, PC1, PHCP1" (ก้อนเดียว)
+        - หลักสูตรอื่นๆ ให้ระบุแยกตามปกติ
+
+        โครงสร้าง JSON: [{ "title": "...", "description": "...", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "type_event": ["PLE-IP1, PC1, PHCP1"] }]`;
+
+        const result = await model.generateContent([
+          { text: prompt },
+          {
+            inlineData: {
+              data: file.buffer.toString('base64'),
+              mimeType: 'application/pdf',
+            },
           },
-        },
-      ]);
+        ]);
 
-      const response = await result.response;
-      const responseText = response.text();
+        const response = await result.response;
+        const responseText = response.text();
 
-      if (!responseText) throw new Error('AI ไม่สามารถดึงข้อมูลได้');
+        if (!responseText) throw new Error('AI ไม่สามารถดึงข้อมูลได้');
 
-      const cleanJson = responseText.replace(/```json|```/g, '').trim();
-      const extractedData = JSON.parse(cleanJson);
+        const cleanJson = responseText.replace(/```json|```/g, '').trim();
+        const extractedData = JSON.parse(cleanJson);
 
-      // ตรวจสอบและ Re-format ข้อมูลเผื่อ AI พลาด
-      return extractedData.map((event: any) => {
-        const types: string[] = event.type_event || [];
-        const hasGroup1 = types.some(t => /PLE-IP1|PC1|PHCP1/.test(t));
+        // ตรวจสอบและ Re-format ข้อมูลเผื่อ AI พลาด
+        return extractedData.map((event: any, index: number) => {
+          const types: string[] = event.type_event || [];
+          const hasGroup1 = types.some(t => /PLE-IP1|PC1|PHCP1/.test(t));
 
-        if (hasGroup1) {
-          const others = types.filter(t => !/PLE-IP1|PC1|PHCP1/.test(t));
-          event.type_event = ["PLE-IP1, PC1, PHCP1", ...others];
+          if (hasGroup1) {
+            const others = types.filter(t => !/PLE-IP1|PC1|PHCP1/.test(t));
+            event.type_event = ["PLE-IP1, PC1, PHCP1", ...others];
+          }
+
+          // ✅ Validation: ถ้า title ว่าง ให้สร้างจาก description หรือวันที่
+          if (!event.title || event.title.trim() === '') {
+            if (event.description) {
+              event.title = event.description.substring(0, 100); // ตัด 100 ตัวอักษรแรก
+            } else if (event.startDate) {
+              event.title = `กิจกรรมวันที่ ${event.startDate}`;
+            } else {
+              event.title = `กิจกรรมที่ ${index + 1}`;
+            }
+          }
+
+          return event;
+        });
+
+      } catch (error: any) {
+        const isRetryable = error.status === 503 || error.status === 429 || error.code === 'ECONNRESET';
+
+        if (isRetryable && attempt < maxRetries) {
+          // Exponential backoff: 1s, 2s, 4s
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          console.warn(`AI Extraction attempt ${attempt}/${maxRetries} failed. Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
         }
-        return event;
-      });
 
-    } catch (error: any) {
-      console.error('AI Extraction Error:', error);
-      throw new BadRequestException('การดึงข้อมูลผิดพลาด: ' + error.message);
+        // ถ้าครบ retry หรือ error ไม่สามารถ retry ได้
+        console.error('AI Extraction Error:', error);
+        throw new BadRequestException(
+          attempt >= maxRetries
+            ? 'AI API ไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
+            : 'การดึงข้อมูลผิดพลาด: ' + error.message
+        );
+      }
     }
   }
 
