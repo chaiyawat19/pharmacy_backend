@@ -5,15 +5,19 @@ import { NewsController } from './news.controller';
 import { NewsArticle } from './entities/news.entity';
 import { NewsCategory } from './entities/news_categories.entity';
 import { NewsTag } from './entities/news_article_tags.entity';
+import { NewsArticleTag } from './entities/news_article_tag.entity';
+import { NewsArticleCategory } from './entities/news_article_category.entity';
 
 import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([NewsArticle, NewsCategory, NewsTag]),
+    TypeOrmModule.forFeature([NewsArticle, NewsCategory, NewsTag, NewsArticleTag, NewsArticleCategory]),
     NotificationsModule,
     UsersModule,
+    CommonModule,
   ],
   controllers: [NewsController],
   providers: [NewsService],

@@ -21,13 +21,19 @@ export class StartCATExamDto {
 
     @IsOptional()
     @IsNumber()
+    item_bank_id?: number;
+
+    @IsOptional()
+    @IsString()
+    mode?: string;
+
+    @IsOptional()
+    @IsNumber()
     target_se?: number;
 
     @IsOptional()
     @IsNumber()
     cut_score?: number;
-
-
 }
 
 export class SubmitCATAnswerDto {

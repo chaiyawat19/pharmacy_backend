@@ -20,15 +20,32 @@ export class ChatbotDocumentsService {
     @InjectRepository(ChatbotDocument)
     private readonly chatbotDocumentRepo: Repository<ChatbotDocument>,
   ) {
+    // ตรวจสอบ env vars ตั้งแต่เริ่มต้น (ถ้าขาดจะได้ error ชัดเจน แทนที่จะใช้ placeholder แล้ว fail ลึกลับ)
+    const requiredEnv: [string, string | undefined][] = [
+      ['GEMINI_API_KEY', process.env.GEMINI_API_KEY],
+      ['PINECONE_API_KEY', process.env.PINECONE_API_KEY],
+      ['PINECONE_INDEX', process.env.PINECONE_INDEX],
+    ];
+    const missing = requiredEnv
+      .filter(([name, value]) => !value || String(value).startsWith('YOUR_'))
+      .map(([name]) => name);
+
+    if (missing.length > 0) {
+      throw new Error(
+        `ChatbotDocumentsService: missing environment variable(s): ${missing.join(', ')}. ` +
+        `กรุณาตั้งค่าใน Railway Dashboard → Variables ก่อนใช้งานฟีเจอร์นี้`,
+      );
+    }
+
     // กำหนดค่า API Keys
-    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'YOUR_GEMINI_API_KEY');
+    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 
     this.pinecone = new Pinecone({
-      apiKey: process.env.PINECONE_API_KEY || 'YOUR_PINECONE_API_KEY',
+      apiKey: process.env.PINECONE_API_KEY as string,
     });
 
-    // ตรวจสอบว่ามี Index ใน Pinecone ตั้งค่า Dimension = 768 (สำหรับ Gemini) 
-    this.pineconeIndex = this.pinecone.index(process.env.PINECONE_INDEX || 'YOUR_INDEX_NAME');
+    // ตรวจสอบว่ามี Index ใน Pinecone ตั้งค่า Dimension = 768 (สำหรับ Gemini)
+    this.pineconeIndex = this.pinecone.index(process.env.PINECONE_INDEX as string);
   }
 
   // Helper สำหรับตัดข้อความเป็นก้อนๆ (Chunking) เพื่อให้ RAG ทำงานได้ดีที่สุด
@@ -149,7 +166,12 @@ export class ChatbotDocumentsService {
       }
       
       await this.chatbotDocumentRepo.delete(savedDoc.id);
-      throw new BadRequestException('เกิดข้อผิดพลาดในการประมวลผล PDF และเพิ่มเข้า Pinecone');
+
+      // แสดง error จริงให้เห็น (ตัดให้สั้น เพื่อให้ debug ผ่าน Railway logs ได้ ไม่ยัดยาวเกินไปลง response)
+      const errorMessage = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+      throw new BadRequestException(
+        `เกิดข้อผิดพลาดในการประมวลผล PDF และเพิ่มเข้า Pinecone: ${errorMessage}`,
+      );
     }
   }
 

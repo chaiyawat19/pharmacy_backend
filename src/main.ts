@@ -7,6 +7,13 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ServerOptions } from 'socket.io';
 import helmet from 'helmet';
+import dns from 'dns';
+
+// บังคับให้ Node แก้ DNS เป็น IPv4 ก่อน (Pinecone/Gemini ใช้ IPv4 เป็นหลัก)
+// ต้อง set ไว้ที่นี่ (ในโค้ด) เพราะ NODE_OPTIONS ใน .env จะถูกโหลดช้าเกินไป —
+// Node อ่าน NODE_OPTIONS ตอน start กระบวนการแล้ว dotenv ยังไม่ทำงาน
+// (เดิมแก้แค่ start:dev ด้วย cross-env แต่พอ deploy แล้วไม่เข้า)
+dns.setDefaultResultOrder('ipv4first');
 
 // ✅ Custom IoAdapter พร้อม CORS
 class CustomIoAdapter extends IoAdapter {

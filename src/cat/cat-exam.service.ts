@@ -81,19 +81,17 @@ export class CATExamService {
             topic_proportions: topic_proportions || null,
         });
 
-        const savedCATSession = await this.catSessionRepo.save(catSessionData);
-
         // เลือกข้อแรกจาก global pool (ไม่ filter ตาม item bank)
-        const firstItem = await this.selectFirstItemForSession(savedCATSession);
+        const firstItem = await this.selectFirstItemForSession(catSessionData);
 
         if (!firstItem) {
             throw new NotFoundException('ไม่มีข้อสอบในระบบที่มี IRT parameters ครบ');
         }
 
-        // อัพเดท session ด้วยข้อแรก
-        savedCATSession.current_item_id = firstItem.item_id;
-        savedCATSession.used_item_ids = [firstItem.item_id];
-        await this.catSessionRepo.save(savedCATSession);
+        // อัพเดท session ด้วยข้อแรก และบันทึกเพียงครั้งเดียว
+        catSessionData.current_item_id = firstItem.item_id;
+        catSessionData.used_item_ids = [firstItem.item_id];
+        const savedCATSession = await this.catSessionRepo.save(catSessionData);
 
         return {
             message: 'เริ่มการสอบ CAT สำเร็จ',
@@ -155,7 +153,8 @@ export class CATExamService {
             .where('item.irt_a_discrimination > 0')
             .andWhere('item.irt_b_difficulty IS NOT NULL')
             .andWhere('item.irt_c_guessing IS NOT NULL')
-            .andWhere("item.status = 'published'");
+            .andWhere("(item.status IS NULL OR LOWER(item.status) IN ('published', 'draft', 'active'))")
+            .andWhere('item.deleted_at IS NULL');
 
         if (itemBankId) {
             query
@@ -334,7 +333,7 @@ export class CATExamService {
         });
 
         return {
-            session_id: session.session_id,
+            session_id: Number(session.session_id),
             current_item: {
                 ...currentItem,
                 answer_options: answerOptions,
@@ -482,7 +481,7 @@ export class CATExamService {
             return {
                 message: 'จบการสอบ',
                 finished: true,
-                session_id: session.session_id,
+                session_id: Number(session.session_id),
                 final_theta: session.final_theta,
                 final_se: session.final_se,
                 num_items: session.num_items,
@@ -559,7 +558,7 @@ export class CATExamService {
                 return {
                     message: 'จบการสอบ (ไม่มีข้อเหลือ)',
                     finished: true,
-                    session_id: session.session_id,
+                    session_id: Number(session.session_id),
                     final_theta: session.final_theta,
                     final_se: session.final_se,
                     num_items: session.num_items,
@@ -584,7 +583,7 @@ export class CATExamService {
                 message: 'ส่งคำตอบสำเร็จ',
                 finished: false,
                 is_correct: isCorrect,
-                session_id: session.session_id,
+                session_id: Number(session.session_id),
                 current_theta: session.current_theta,
                 current_se: session.current_se,
                 num_items: session.num_items,

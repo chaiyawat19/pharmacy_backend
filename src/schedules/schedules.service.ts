@@ -12,6 +12,7 @@ import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { NameUniquenessService } from '../common/name-uniqueness.service';
 
 @Injectable()
 export class SchedulesService {
@@ -22,6 +23,7 @@ export class SchedulesService {
     private readonly scheduleRepo: Repository<Schedule>,
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
+    private readonly nameUniquenessService: NameUniquenessService,
   ) {
     this.genAI = new GoogleGenerativeAI(
       'AIzaSyDY193ogKLZtP9iYoUkTysUxV3-JSUIEA0',
@@ -80,6 +82,18 @@ export class SchedulesService {
 
   async create(createScheduleDto: CreateScheduleDto, userId: number) {
     if (!userId) throw new UnauthorizedException('กรุณา Login ใหม่');
+
+    // Check name uniqueness across all entities
+    const uniquenessCheck = await this.nameUniquenessService.checkNameUniqueness(
+      createScheduleDto.title,
+      'schedule'
+    );
+
+    if (uniquenessCheck.exists) {
+      throw new BadRequestException(
+        `ชื่อ "${createScheduleDto.title}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+      );
+    }
 
     // 1. ตรวจสอบวันที่ (ป้องกัน NaN/Invalid Date)
     const start = new Date(createScheduleDto.startDate);

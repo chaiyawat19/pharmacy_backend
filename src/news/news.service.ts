@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { NewsArticle } from './entities/news.entity';
@@ -12,6 +12,7 @@ import { UsersService } from '../users/users.service';
 // เปลี่ยนมาใช้ Syntax เดียวกับ SchedulesService
 import { GoogleGenAI } from '@google/genai';
 import puppeteer from 'puppeteer';
+import { NameUniquenessService } from '../common/name-uniqueness.service';
 
 @Injectable()
 export class NewsService {
@@ -26,6 +27,7 @@ export class NewsService {
     private readonly tagRepository: Repository<NewsTag>,
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
+    private readonly nameUniquenessService: NameUniquenessService,
   ) {
     // ตั้งค่า Constructor แบบเดียวกับ SchedulesService
     this.ai = new GoogleGenAI({
@@ -112,6 +114,18 @@ export class NewsService {
 
   // --- ฟังก์ชัน CRUD (คงเดิม) ---
   async create(createNewsDto: CreateNewsDto) {
+    // Check name uniqueness across all entities
+    const uniquenessCheck = await this.nameUniquenessService.checkNameUniqueness(
+      createNewsDto.title,
+      'news'
+    );
+
+    if (uniquenessCheck.exists) {
+      throw new BadRequestException(
+        `ชื่อ "${createNewsDto.title}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+      );
+    }
+
     const { categoryIds, tagIds, ...articleData } = createNewsDto;
     const news = this.newsRepository.create(articleData);
     if (categoryIds && categoryIds.length > 0) {

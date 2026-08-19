@@ -17,6 +17,7 @@ import { SchedulesService } from './schedules.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('schedules')
@@ -78,11 +79,13 @@ export class SchedulesController {
     return events;
   }
 
+  @Public()
   @Get()
   findAll() {
     return this.schedulesService.findAll();
   }
 
+  @Public()
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.schedulesService.findOne(+id);

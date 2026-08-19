@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { CreateTopicDto, CreateSubTopicDto } from './dto/create-topic.dto';
 import { UpdateTopicDto } from './dto/update-topic.dto';
 import { Topic } from './entities/topic.entity';
@@ -6,6 +6,7 @@ import { SubTopic } from './entities/sub-topics.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ItemSubTopic } from '../items-bank/entities/item_sub_topics.entity';
+import { NameUniquenessService } from '../common/name-uniqueness.service';
 
 @Injectable()
 export class TopicsService {
@@ -16,14 +17,39 @@ export class TopicsService {
     private readonly subTopicRepository: Repository<SubTopic>,
     @InjectRepository(ItemSubTopic)
     private readonly itemSubTopicRepo: Repository<ItemSubTopic>,
+    private readonly nameUniquenessService: NameUniquenessService,
   ) { }
 
-  create(createTopicDto: CreateTopicDto) {
+  async create(createTopicDto: CreateTopicDto) {
+    // Check name uniqueness across all entities
+    const uniquenessCheck = await this.nameUniquenessService.checkNameUniqueness(
+      createTopicDto.topic_name,
+      'topic'
+    );
+
+    if (uniquenessCheck.exists) {
+      throw new BadRequestException(
+        `ชื่อ "${createTopicDto.topic_name}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+      );
+    }
+
     const topic = this.topicRepository.create(createTopicDto);
     return this.topicRepository.save(topic);
   }
 
-  createSubTopic(createSubTopicDto: CreateSubTopicDto) {
+  async createSubTopic(createSubTopicDto: CreateSubTopicDto) {
+    // Check name uniqueness across all entities
+    const uniquenessCheck = await this.nameUniquenessService.checkNameUniqueness(
+      createSubTopicDto.sub_topic_name,
+      'subtopic'
+    );
+
+    if (uniquenessCheck.exists) {
+      throw new BadRequestException(
+        `ชื่อ "${createSubTopicDto.sub_topic_name}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+      );
+    }
+
     const subTopic = this.subTopicRepository.create(createSubTopicDto);
     return this.subTopicRepository.save(subTopic);
   }

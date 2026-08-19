@@ -14,10 +14,16 @@ export const AppDataSource = new DataSource({
   database: process.env.DB_DATABASE || 'pharmacy_project',
 
   // ใช้ path แบบ absolute ไม่ใช้ src/ alias
-  entities: [join(__dirname, '**', '*.entity.ts')],
+  entities: [
+    join(__dirname, '**', '*.entity.ts'),
+    join(__dirname, '**', '*.entity.js'),
+  ],
 
   // โฟลเดอร์เก็บ migration files
-  migrations: [join(__dirname, 'migrations', '*.ts')],
+  migrations: [
+    join(__dirname, 'migrations', '*.ts'),
+    join(__dirname, 'migrations', '*.js'),
+  ],
 
   // ปิด synchronize เสมอเมื่อใช้ migrations
   synchronize: false,
