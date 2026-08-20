@@ -107,9 +107,10 @@ export class UserDashboardService {
       .map((r) => ({ uid: Number(r.uid), avg: Number(r.avg) || 0 }))
       .sort((a, b) => b.avg - a.avg);
 
-    const totalUsers = sorted.length;
+    // นับ total users จากตาราง users ทั้งหมด แทนที่จะนับจากคนที่ทำข้อสอบ
+    const totalUsers = await this.userRepo.count();
     const idx = sorted.findIndex((r) => r.uid === userId);
-    const currentRank = idx >= 0 ? idx + 1 : totalUsers + 1;
+    const currentRank = idx >= 0 ? idx + 1 : totalUsers;
     const percentile =
       totalUsers > 0 ? ((totalUsers - currentRank) / totalUsers) * 100 : 0;
 
