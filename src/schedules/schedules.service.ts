@@ -131,7 +131,7 @@ export class SchedulesService {
 
     if (uniquenessCheck.exists) {
       throw new BadRequestException(
-        `ชื่อ "${createScheduleDto.title}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+        `ชื่อ "${createScheduleDto.title}" ถูกใช้ไปแล้ว`
       );
     }
 

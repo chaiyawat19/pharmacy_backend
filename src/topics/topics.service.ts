@@ -4,7 +4,7 @@ import { UpdateTopicDto } from './dto/update-topic.dto';
 import { Topic } from './entities/topic.entity';
 import { SubTopic } from './entities/sub-topics.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { ItemSubTopic } from '../items-bank/entities/item_sub_topics.entity';
 import { NameUniquenessService } from '../common/name-uniqueness.service';
 
@@ -29,7 +29,7 @@ export class TopicsService {
 
     if (uniquenessCheck.exists) {
       throw new BadRequestException(
-        `ชื่อ "${createTopicDto.topic_name}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+        `ชื่อ "${createTopicDto.topic_name}" ถูกใช้ไปแล้ว`
       );
     }
 
@@ -46,7 +46,7 @@ export class TopicsService {
 
     if (uniquenessCheck.exists) {
       throw new BadRequestException(
-        `ชื่อ "${createSubTopicDto.sub_topic_name}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+        `ชื่อ "${createSubTopicDto.sub_topic_name}" ถูกใช้ไปแล้ว`
       );
     }
 
@@ -101,9 +101,18 @@ export class TopicsService {
   }
 
   async remove(id: number) {
-    // ลบ sub-topics ที่เกี่ยวข้องก่อน
-    await this.subTopicRepository.delete({ topic_id: id });
-    // แล้วค่อยลบ topic
+    // 1. หา sub-topics ทั้งหมดภายใต้ topic นี้
+    const subTopics = await this.subTopicRepository.find({ where: { topic_id: id } });
+    const subTopicIds = subTopics.map(st => st.sub_topic_id);
+
+    // 2. ลบ item_sub_topics ที่ผูกกับ sub-topics เหล่านี้
+    if (subTopicIds.length > 0) {
+      await this.itemSubTopicRepo.delete({ sub_topic_id: In(subTopicIds) });
+      // 3. ลบ sub-topics
+      await this.subTopicRepository.delete({ topic_id: id });
+    }
+
+    // 4. ลบ topic
     return this.topicRepository.delete(id);
   }
 
@@ -146,7 +155,10 @@ export class TopicsService {
     return this.subTopicRepository.update(id, updateData);
   }
 
-  removeSubTopic(id: number) {
+  async removeSubTopic(id: number) {
+    // 1. ลบ item_sub_topics ที่ผูกกับ sub-topic นี้
+    await this.itemSubTopicRepo.delete({ sub_topic_id: id });
+    // 2. ลบ sub-topic
     return this.subTopicRepository.delete(id);
   }
 

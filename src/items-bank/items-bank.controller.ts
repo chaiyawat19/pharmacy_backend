@@ -36,6 +36,11 @@ export class ItemsBankController {
     return this.itemsBankService.getBank();
   }
 
+  @Get('deleted')
+  getDeletedBanks() {
+    return this.itemsBankService.getDeletedBanks();
+  }
+
   @Public()
   @Get('search')
   search(@Query('q') query: string) {
@@ -130,6 +135,16 @@ export class ItemsBankController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.itemsBankService.remove(+id);
+  }
+
+  @Patch(':id/restore')
+  restore(@Param('id') id: string) {
+    return this.itemsBankService.restoreBank(+id);
+  }
+
+  @Delete(':id/permanent')
+  hardDelete(@Param('id') id: string) {
+    return this.itemsBankService.hardDeleteBank(+id);
   }
 
   @Post(':id/upload-pdf')

@@ -9,7 +9,7 @@ import { ReorderItemsDto } from './dto/reorder-items.dto';
 import { ItemsBank } from './entities/items-bank.entity';
 import { ItemSituation } from './entities/item_situations.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, In, ILike } from 'typeorm';
+import { DataSource, Repository, In, ILike, Not, IsNull } from 'typeorm';
 import { Item } from './entities/items.entity';
 import { ItemBankItem } from './entities/item_bank_items.entity';
 import { AnswerOption } from './entities/answer_options.entity';
@@ -72,7 +72,7 @@ export class ItemsBankService {
 
     if (uniquenessCheck.exists) {
       throw new BadRequestException(
-        `ชื่อ "${createItemsBankDto.bank_name}" ถูกใช้ไปแล้วใน${uniquenessCheck.conflictingEntity}`
+        `ชื่อ "${createItemsBankDto.bank_name}" ถูกใช้ไปแล้ว`
       );
     }
 
@@ -295,6 +295,18 @@ export class ItemsBankService {
   async getBank() {
     const banks = await this.bankRepo.find({
       order: { item_bank_id: 'ASC' }
+    });
+
+    return this.enrichBanksWithDetails(banks);
+  }
+
+  async getDeletedBanks() {
+    const banks = await this.bankRepo.find({
+      withDeleted: true,
+      where: {
+        deleted_at: Not(IsNull())
+      },
+      order: { deleted_at: 'DESC' }
     });
 
     return this.enrichBanksWithDetails(banks);
@@ -867,6 +879,126 @@ export class ItemsBankService {
       };
     } catch (err) {
       await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * กู้คืนคลังข้อสอบที่ถูก Soft Delete พร้อมสถานการณ์และคำถามที่เกี่ยวข้อง
+   */
+  async restoreBank(id: number) {
+    const queryRunner = this.bankRepo.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. Restore Item Bank
+      await queryRunner.manager.restore(ItemsBank, { item_bank_id: id });
+
+      // 2. Restore Situations และ Items ภายใต้ Item Bank นี้
+      const situations = await this.situationRepo.find({
+        where: { item_bank_id: id },
+        withDeleted: true
+      });
+
+      for (const situation of situations) {
+        await queryRunner.manager.restore(ItemSituation, { situation_id: situation.situation_id });
+        const itemsInSituation = await this.itemRepo.find({
+          where: { situation_id: situation.situation_id },
+          withDeleted: true
+        });
+
+        for (const item of itemsInSituation) {
+          await queryRunner.manager.restore(Item, { item_id: item.item_id });
+        }
+      }
+
+      // 3. Restore direct items in item_bank_items if any
+      const bankItems = await this.itemBankItemRepo.find({ where: { item_bank_id: id } });
+      for (const bi of bankItems) {
+        await queryRunner.manager.restore(Item, { item_id: bi.item_id });
+      }
+
+      await queryRunner.commitTransaction();
+
+      return {
+        message: 'กู้คืนคลังข้อสอบสำเร็จ',
+        success: true,
+      };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * ลบคลังข้อสอบอย่างถาวร (Permanent Hard Delete) ออกจากฐานข้อมูล
+   */
+  async hardDeleteBank(id: number) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const bankItems = await this.itemBankItemRepo.find({ where: { item_bank_id: id } });
+      const itemIdsFromBankItems = bankItems.map(bi => bi.item_id);
+
+      const situations = await this.situationRepo.find({ where: { item_bank_id: id }, withDeleted: true });
+      const situationIds = situations.map(s => s.situation_id);
+
+      let itemIdsFromSituations: number[] = [];
+      if (situationIds.length > 0) {
+        const itemsInSituations = await this.itemRepo.find({
+          where: { situation_id: In(situationIds) },
+          withDeleted: true
+        });
+        itemIdsFromSituations = itemsInSituations.map(i => i.item_id);
+      }
+
+      const allItemIds = Array.from(new Set([...itemIdsFromBankItems, ...itemIdsFromSituations]));
+      const sessions = await this.examSessionRepo.find({ where: { itemBankId: id } });
+      const sessionIds = sessions.map(s => s.session_id);
+
+      if (allItemIds.length > 0) {
+        await queryRunner.query(`DELETE FROM answer_options WHERE item_id = ANY($1)`, [allItemIds]);
+        await queryRunner.query(`DELETE FROM item_sub_topics WHERE item_id = ANY($1)`, [allItemIds]);
+        await queryRunner.query(`DELETE FROM user_item_mastery WHERE item_id = ANY($1)`, [allItemIds]);
+        await queryRunner.query(`DELETE FROM item_answers WHERE item_id = ANY($1)`, [allItemIds]);
+        await queryRunner.query(`DELETE FROM item_bank_items WHERE item_id = ANY($1) OR item_bank_id = $2`, [allItemIds, id]);
+        await queryRunner.query(`DELETE FROM items WHERE item_id = ANY($1)`, [allItemIds]);
+      } else {
+        await queryRunner.manager.delete(ItemBankItem, { item_bank_id: id });
+      }
+
+      if (sessionIds.length > 0) {
+        await queryRunner.query(`DELETE FROM item_answers WHERE session_id = ANY($1)`, [sessionIds]);
+        await queryRunner.query(`DELETE FROM exam_sessions WHERE session_id = ANY($1) OR item_bank_id = $2`, [sessionIds, id]);
+      } else {
+        await queryRunner.manager.delete(ExamSession, { itemBankId: id });
+      }
+
+      if (situationIds.length > 0) {
+        await queryRunner.query(`DELETE FROM item_situations WHERE situation_id = ANY($1) OR item_bank_id = $2`, [situationIds, id]);
+      } else {
+        await queryRunner.manager.delete(ItemSituation, { item_bank_id: id });
+      }
+
+      await queryRunner.manager.delete(ItemBankCategory, { item_bank_id: id });
+      const result = await queryRunner.manager.delete(ItemsBank, { item_bank_id: id });
+
+      await queryRunner.commitTransaction();
+
+      return {
+        message: (result.affected ?? 0) > 0 ? 'ลบคลังข้อสอบถาวรสำเร็จ' : 'ไม่พบคลังข้อสอบที่ต้องการลบ',
+        success: (result.affected ?? 0) > 0
+      };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      console.error('Error hard deleting item bank:', err);
       throw err;
     } finally {
       await queryRunner.release();
