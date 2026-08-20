@@ -98,8 +98,8 @@ export class ChatbotDocumentsService {
       const chunks = this.chunkText(rawText);
       this.logger.log(`PDF parsed successfully. Separated into ${chunks.length} chunks.`);
 
-      // เลือกใช้ Model ประสิทธิภาพสูงรุ่นล่าสุด (v004) และปรับให้ Dimension ตรงกับ Pinecone Index (1024)
-      const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-001" });
+      // เลือกใช้ Model Embedding มาตรฐานของ Google AI Studio (text-embedding-004) สำหรับ 768 dimensions
+      const embeddingModel = this.genAI.getGenerativeModel({ model: "text-embedding-004" });
 
       // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
       const batchSize = 100; 
