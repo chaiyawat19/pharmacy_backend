@@ -38,7 +38,7 @@ export class SchedulesService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const model = this.genAI.getGenerativeModel({
-          model: 'gemini-3.6',
+          model: 'gemini-1.5-flash',
         });
 
         const prompt = `ดึงข้อมูลกำหนดการจาก PDF นี้และตอบกลับเป็น JSON Array เท่านั้น
