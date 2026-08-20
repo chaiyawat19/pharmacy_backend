@@ -1,72 +1,259 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Chat_session } from './entities/chat_session.entity';
 import { Repository } from 'typeorm';
 import { Chat_message } from './entities/chat_message.entity';
+import { Chat_quota } from './entities/chat_quota.entity';
 import { firstValueFrom } from 'rxjs';
 
-interface N8NResponse {
-    reply: string;
+export const MAX_DAILY_CAPACITY_POINTS = 100; // 100% capacity
+export const MAX_MESSAGE_LENGTH = 1000; // Max characters per message
+
+export interface QuotaInfo {
+    capacity_percentage: number; // % ใช้งานไปแล้ว (0 - 100)
+    remaining_percentage: number; // % ที่เหลืออยู่ (0 - 100)
+    used_points: number;
+    max_points: number;
+    message_count: number;
+    is_limited: boolean;
+    max_message_length: number;
+    reset_at: string; // ISO string ของเที่ยงคืน
+    reset_in_seconds: number;
 }
 
 @Injectable()
 export class ChatService {
+    // ── In-memory Concurrent Request Lock ──
+    private readonly activeUsers = new Set<number>();
+
     constructor(
         private readonly httpService: HttpService,
         @InjectRepository(Chat_session)
         private readonly sessionRepo: Repository<Chat_session>,
         @InjectRepository(Chat_message)
-        private readonly messageRepo: Repository<Chat_message>
+        private readonly messageRepo: Repository<Chat_message>,
+        @InjectRepository(Chat_quota)
+        private readonly quotaRepo: Repository<Chat_quota>
     ) { }
 
-    // ส่งข้อความไปยัง n8n 2 รอบ
-    async sendMessageToN8N(user_id: number, session_id: number, message: string): Promise<any> {
+    /**
+     * คำนวณวันที่ปัจจุบันในรูปแบบ YYYY-MM-DD (ตาม Timezone ประเทศไทย UTC+7)
+     */
+    private getTodayString(): string {
+        const now = new Date();
+        // Offset to UTC+7
+        const thaiTime = new Date(now.getTime() + 7 * 3600 * 1000);
+        return thaiTime.toISOString().split('T')[0];
+    }
 
-        if (!session_id || session_id.toString() === 'null' || Number.isNaN(Number(session_id))) {
-            const newSession = await this.sessionRepo.save({
-                user_id: user_id,
-                title: message.slice(0, 50)
-            });
+    /**
+     * คำนวณเวลาที่เหลือก่อนถึงเที่ยงคืน (00:00 น. ของวันถัดไปใน UTC+7)
+     */
+    private getResetTimeInfo(): { reset_at: string; reset_in_seconds: number } {
+        const now = new Date();
+        const thaiNow = new Date(now.getTime() + 7 * 3600 * 1000);
 
-            session_id = newSession.session_id;
+        // Next midnight in Thai Time
+        const nextMidnight = new Date(thaiNow);
+        nextMidnight.setUTCHours(24, 0, 0, 0);
+
+        const diffMs = nextMidnight.getTime() - thaiNow.getTime();
+        const reset_in_seconds = Math.max(0, Math.floor(diffMs / 1000));
+
+        // Real UTC Date of reset
+        const realResetDate = new Date(now.getTime() + diffMs);
+
+        return {
+            reset_at: realResetDate.toISOString(),
+            reset_in_seconds,
+        };
+    }
+
+    /**
+     * คำนวณคะแนนที่ต้องใช้ตามขนาดความยาวข้อความ (Dynamic Capacity)
+     */
+    private calculateMessageCost(message: string): number {
+        const len = (message || '').trim().length;
+        if (len <= 250) return 2;     // สั้นทั่วไป (คุยได้ประมาณ 50 ข้อความ/วัน)
+        if (len <= 600) return 3;     // ปานกลาง
+        return 5;                    // ยาวเต็มที่ (601 - 1000 ตัวอักษร)
+    }
+
+    /**
+     * ดึงข้อมูล Quota ประจำวันของผู้ใช้
+     */
+    async getUserQuota(userId: number): Promise<QuotaInfo> {
+        if (!userId) {
+            throw new BadRequestException('Invalid user_id');
         }
 
-        const savedUserMessage = await this.messageRepo.save({
-            chat_session_id: session_id,
-            message_text: message,
-            sender_type: 'USER'
+        const today = this.getTodayString();
+        let quota = await this.quotaRepo.findOne({
+            where: { user_id: userId, usage_date: today }
         });
 
-        const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
-        let botReply = '';
+        if (!quota) {
+            quota = this.quotaRepo.create({
+                user_id: userId,
+                usage_date: today,
+                used_points: 0,
+                message_count: 0
+            });
+        }
 
-        const payload = { user_id, session_id, message };
+        const usedPoints = quota.used_points || 0;
+        const capacityPercentage = Math.min(100, Math.round((usedPoints / MAX_DAILY_CAPACITY_POINTS) * 100));
+        const remainingPercentage = Math.max(0, 100 - capacityPercentage);
+        const isLimited = capacityPercentage >= 100;
+        const { reset_at, reset_in_seconds } = this.getResetTimeInfo();
+
+        return {
+            capacity_percentage: capacityPercentage,
+            remaining_percentage: remainingPercentage,
+            used_points: usedPoints,
+            max_points: MAX_DAILY_CAPACITY_POINTS,
+            message_count: quota.message_count || 0,
+            is_limited: isLimited,
+            max_message_length: MAX_MESSAGE_LENGTH,
+            reset_at,
+            reset_in_seconds
+        };
+    }
+
+    /**
+     * ตรวจสอบและหักโควตาการใช้งาน
+     */
+    private async checkAndConsumeQuota(userId: number, message: string): Promise<QuotaInfo> {
+        const today = this.getTodayString();
+        let quota = await this.quotaRepo.findOne({
+            where: { user_id: userId, usage_date: today }
+        });
+
+        if (!quota) {
+            quota = this.quotaRepo.create({
+                user_id: userId,
+                usage_date: today,
+                used_points: 0,
+                message_count: 0
+            });
+        }
+
+        const currentPercentage = Math.min(100, Math.round(((quota.used_points || 0) / MAX_DAILY_CAPACITY_POINTS) * 100));
+        const { reset_at, reset_in_seconds } = this.getResetTimeInfo();
+
+        if (currentPercentage >= 100) {
+            const hours = Math.floor(reset_in_seconds / 3600);
+            const minutes = Math.floor((reset_in_seconds % 3600) / 60);
+            throw new HttpException({
+                statusCode: HttpStatus.TOO_MANY_REQUESTS,
+                error: 'QUOTA_EXCEEDED',
+                message: `คุณใช้งานความจุแชตบอตครบ 100% สำหรับวันนี้แล้ว กรุณารออีก ${hours > 0 ? `${hours} ชั่วโมง ` : ''}${minutes} นาที เพื่อรีเซ็ตความจุใหม่ในเวลา 00:00 น.`,
+                reset_at,
+                reset_in_seconds,
+                capacity_percentage: 100
+            }, HttpStatus.TOO_MANY_REQUESTS);
+        }
+
+        const cost = this.calculateMessageCost(message);
+        quota.used_points = Math.min(MAX_DAILY_CAPACITY_POINTS, (quota.used_points || 0) + cost);
+        quota.message_count = (quota.message_count || 0) + 1;
+        await this.quotaRepo.save(quota);
+
+        const newPercentage = Math.min(100, Math.round((quota.used_points / MAX_DAILY_CAPACITY_POINTS) * 100));
+
+        return {
+            capacity_percentage: newPercentage,
+            remaining_percentage: Math.max(0, 100 - newPercentage),
+            used_points: quota.used_points,
+            max_points: MAX_DAILY_CAPACITY_POINTS,
+            message_count: quota.message_count,
+            is_limited: newPercentage >= 100,
+            max_message_length: MAX_MESSAGE_LENGTH,
+            reset_at,
+            reset_in_seconds
+        };
+    }
+
+    /**
+     * ส่งข้อความไปยัง AI (พร้อม Concurrent Lock, Message Length Cap และ Dynamic Quota)
+     */
+    async sendMessageToN8N(user_id: number, session_id: number, message: string): Promise<any> {
+        // 1. ตรวจสอบ Message Length Cap
+        if (!message || message.trim().length === 0) {
+            throw new BadRequestException('กรุณาระบุข้อความ');
+        }
+
+        if (message.length > MAX_MESSAGE_LENGTH) {
+            throw new BadRequestException(`ข้อความมีความยาวเกินกำหนด (สูงสุด ${MAX_MESSAGE_LENGTH} ตัวอักษร)`);
+        }
+
+        // 2. ตรวจสอบ Concurrent Request Lock (1 Request ต่อ 1 User)
+        if (this.activeUsers.has(user_id)) {
+            throw new HttpException({
+                statusCode: HttpStatus.TOO_MANY_REQUESTS,
+                error: 'CONCURRENT_REQUEST_LIMIT',
+                message: 'กำลังประมวลผลข้อความก่อนหน้า กรุณารอสักครู่ก่อนส่งข้อความใหม่'
+            }, HttpStatus.TOO_MANY_REQUESTS);
+        }
+
+        // 3. ล็อค Concurrent Lock
+        this.activeUsers.add(user_id);
 
         try {
-            const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
-            const data = response.data;
+            // 4. ตรวจสอบและหัก Dynamic Quota
+            const quotaInfo = await this.checkAndConsumeQuota(user_id, message);
 
-            // เช็คว่า n8n ส่ง error JSON กลับมาหรือไม่
-            if (data?.status === 'error') {
-                botReply = this.formatN8NErrorMessage(data);
-            } else {
-                botReply = this.cleanBotReply(data?.reply ?? '');
+            if (!session_id || session_id.toString() === 'null' || Number.isNaN(Number(session_id))) {
+                const newSession = await this.sessionRepo.save({
+                    user_id: user_id,
+                    title: message.slice(0, 50)
+                });
+                session_id = newSession.session_id;
             }
 
-            botReply = response.data?.reply ?? '';
+            const savedUserMessage = await this.messageRepo.save({
+                chat_session_id: session_id,
+                message_text: message,
+                sender_type: 'USER'
+            });
 
-        } catch (error) {
-            botReply = this.handleN8NError(error);
+            const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
+            let botReply = '';
+            const payload = { user_id, session_id, message };
+
+            try {
+                const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
+                const data = response.data;
+
+                if (data?.status === 'error') {
+                    botReply = this.formatN8NErrorMessage(data);
+                } else {
+                    botReply = this.cleanBotReply(data?.reply ?? '');
+                }
+
+                if (!botReply) {
+                    botReply = response.data?.reply ?? '';
+                }
+            } catch (error) {
+                botReply = this.handleN8NError(error);
+            }
+
+            const savedBotMessage = await this.messageRepo.save({
+                chat_session_id: session_id,
+                message_text: botReply,
+                sender_type: 'BOT'
+            });
+
+            return {
+                user: savedUserMessage,
+                bot: savedBotMessage,
+                quota: quotaInfo
+            };
+        } finally {
+            // ปลดล็อค Concurrent Lock เสมอ
+            this.activeUsers.delete(user_id);
         }
-
-        const savedBotMessage = await this.messageRepo.save({
-            chat_session_id: session_id,
-            message_text: botReply,
-            sender_type: 'BOT'
-        });
-
-        return { user: savedUserMessage, bot: savedBotMessage };
     }
 
     // ดึงข้อมูลแชททั้งหมดภายใน session
@@ -96,6 +283,13 @@ export class ChatService {
     }
 
     async editMessage(message_id: number, message_text: string) {
+        if (!message_text || message_text.trim().length === 0) {
+            throw new BadRequestException('กรุณาระบุข้อความ');
+        }
+
+        if (message_text.length > MAX_MESSAGE_LENGTH) {
+            throw new BadRequestException(`ข้อความมีความยาวเกินกำหนด (สูงสุด ${MAX_MESSAGE_LENGTH} ตัวอักษร)`);
+        }
 
         const existingMessage = await this.messageRepo.findOne({
             where: { message_id },
@@ -106,42 +300,61 @@ export class ChatService {
             throw new HttpException('Message not found', HttpStatus.NOT_FOUND);
         }
 
-        existingMessage.message_text = message_text;
-        const updatedUserMessage = await this.messageRepo.save(existingMessage);
-
-        const session_id = existingMessage.chat_session_id;
         const user_id = existingMessage.chat_session.user_id;
 
-        const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
-        let botReply = '';
-
-        const payload = { user_id, session_id, message: message_text };
-
-        try {
-            const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
-            const data = response.data;
-
-            // เช็คว่า n8n ส่ง error JSON กลับมาหรือไม่
-            if (data?.status === 'error') {
-                botReply = this.formatN8NErrorMessage(data);
-            } else {
-                botReply = this.cleanBotReply(data?.reply ?? '');
-            }
-        } catch (error) {
-            botReply = this.handleN8NError(error);
+        // Concurrent Request Lock
+        if (this.activeUsers.has(user_id)) {
+            throw new HttpException({
+                statusCode: HttpStatus.TOO_MANY_REQUESTS,
+                error: 'CONCURRENT_REQUEST_LIMIT',
+                message: 'กำลังประมวลผลข้อความก่อนหน้า กรุณารอสักครู่'
+            }, HttpStatus.TOO_MANY_REQUESTS);
         }
 
-        const savedBotMessage = await this.messageRepo.save({
-            chat_session_id: session_id,
-            message_text: botReply,
-            sender_type: 'BOT'
-        });
+        this.activeUsers.add(user_id);
 
-        return { user: updatedUserMessage, bot: savedBotMessage };
+        try {
+            // Check & consume quota
+            const quotaInfo = await this.checkAndConsumeQuota(user_id, message_text);
+
+            existingMessage.message_text = message_text;
+            const updatedUserMessage = await this.messageRepo.save(existingMessage);
+
+            const session_id = existingMessage.chat_session_id;
+            const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
+            let botReply = '';
+            const payload = { user_id, session_id, message: message_text };
+
+            try {
+                const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
+                const data = response.data;
+
+                if (data?.status === 'error') {
+                    botReply = this.formatN8NErrorMessage(data);
+                } else {
+                    botReply = this.cleanBotReply(data?.reply ?? '');
+                }
+            } catch (error) {
+                botReply = this.handleN8NError(error);
+            }
+
+            const savedBotMessage = await this.messageRepo.save({
+                chat_session_id: session_id,
+                message_text: botReply,
+                sender_type: 'BOT'
+            });
+
+            return {
+                user: updatedUserMessage,
+                bot: savedBotMessage,
+                quota: quotaInfo
+            };
+        } finally {
+            this.activeUsers.delete(user_id);
+        }
     }
 
     private cleanBotReply(reply: string): string {
-        // ลบข้อความประเภท [Used tools: ... ]] ออก (รวมถึงขึ้นบรรทัดใหม่ที่ตามมา)
         return reply.replace(/^\[Used tools:[\s\S]*?\]\]\s*/i, '').trim();
     }
 
@@ -152,7 +365,6 @@ export class ChatService {
             data: error.response?.data
         });
 
-        // ถ้า n8n ส่ง error JSON มาใน response.data ของ axios error
         if (error.response?.data?.status === 'error') {
             return this.formatN8NErrorMessage(error.response.data);
         }
@@ -167,7 +379,7 @@ export class ChatService {
             return 'ระบบประมวลผล AI (n8n) ขัดข้องชั่วคราว กำลังเร่งแก้ไขครับ';
         }
 
-        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
             return 'การเชื่อมต่อกับ AI ใช้เวลานานเกินไป กรุณาลองส่งข้อความใหม่อีกครั้งครับ';
         }
 
@@ -178,7 +390,6 @@ export class ChatService {
         const msg = data.error_message || 'เกิดข้อผิดพลาดในการประมวลผล';
         const desc = data.error_description ? ` (${data.error_description})` : '';
 
-        // ถ้าเป็นเรื่อง Rate Limit จากข้างใน n8n
         if (msg.includes('too many requests') || msg.includes('limit')) {
             return 'ขณะนี้ AI มีผู้ใช้งานจำนวนมาก (Rate Limit) กรุณาเว้นระยะเวลาสักครู่แล้วส่งใหม่ครับ';
         }

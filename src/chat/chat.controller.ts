@@ -1,9 +1,16 @@
-import { Controller, Post, Body, Param, Get, Delete, Put } from '@nestjs/common';
+import { Controller, Post, Body, Param, Get, Delete, Put, ParseIntPipe } from '@nestjs/common';
 import { ChatService } from './chat.service';
 
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) { }
+
+  @Get('quota/:user_id')
+  async getQuota(
+    @Param('user_id', ParseIntPipe) user_id: number
+  ) {
+    return this.chatService.getUserQuota(user_id);
+  }
 
   @Post('send/:session_id')
   async sendMessage(
@@ -47,6 +54,4 @@ export class ChatController {
   ) {
     return this.chatService.editMessage(message_id, message);
   }
-
-
 }
