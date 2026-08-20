@@ -1,5 +1,14 @@
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+
 export class CreateNoteDto {
+  @IsString()
+  @IsNotEmpty({ message: 'กรุณาระบุหัวข้อโน้ต' })
   title: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'กรุณาระบุเนื้อหาโน้ต' })
   content: string;
-  tagIds?: any; // ปรับเป็น any เพื่อให้รองรับ string, string[] และ number[]
+
+  @IsOptional()
+  tagIds?: any; // รองรับ string, string[] และ number[]
 }

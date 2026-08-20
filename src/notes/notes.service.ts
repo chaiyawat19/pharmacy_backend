@@ -55,16 +55,21 @@ export class NotesService {
     return this.findOne(note.note_id);
   }
 
-  findAll() {
+  findAll(userId?: number) {
+    const where = userId ? { user_id: userId } : {};
     return this.noteRepository.find({
+      where,
       relations: ['tags', 'tags.tag', 'files'],
       order: { note_id: 'DESC' },
     });
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, userId?: number) {
+    const where: any = { note_id: id };
+    if (userId) where.user_id = userId;
+
     const note = await this.noteRepository.findOne({
-      where: { note_id: id },
+      where,
       relations: ['tags', 'tags.tag', 'files'],
     });
     if (!note) throw new NotFoundException('Note not found');
