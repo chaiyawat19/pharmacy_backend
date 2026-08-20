@@ -71,7 +71,8 @@ export class NewsController {
     if (!file) {
       throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
     }
-    return { url: `${process.env.BACKEND_URL}/uploads/${file.filename}` };
+    const backendUrl = process.env.BACKEND_URL || '';
+    return { url: `${backendUrl}/uploads/${file.filename}` };
   }
 
   @Post()
