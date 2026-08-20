@@ -98,8 +98,8 @@ export class ChatbotDocumentsService {
       const chunks = this.chunkText(rawText);
       this.logger.log(`PDF parsed successfully. Separated into ${chunks.length} chunks.`);
 
-      // ใช้ model "embedding-001" ซึ่งรองรับ 768 dimensions
-      const embeddingModel = this.genAI.getGenerativeModel({ model: "embedding-001" });
+      // ใช้ model "gemini-embedding-004" ซึ่งรองรับ 768 dimensions
+      const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-004" });
 
       // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
       const batchSize = 100; 
