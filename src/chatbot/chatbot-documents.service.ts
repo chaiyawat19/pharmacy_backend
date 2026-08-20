@@ -99,7 +99,7 @@ export class ChatbotDocumentsService {
       this.logger.log(`PDF parsed successfully. Separated into ${chunks.length} chunks.`);
 
       
-      const embeddingModel = this.genAI.getGenerativeModel({ model: "text-embedding-001" });
+      const embeddingModel = this.genAI.getGenerativeModel({ model: "text-embedding-004" });
 
       // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
       const batchSize = 100; 
