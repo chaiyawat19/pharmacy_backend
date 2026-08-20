@@ -18,7 +18,6 @@ import { ItemsBankModule } from './items-bank/items-bank.module';
 import { TopicsModule } from './topics/topics.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CATModule } from './cat/cat.module';
-import { MSTModule } from './mst/mst.module';
 import { MailModule } from './mail/mail.module';
 import { UserDashboardModule } from './user-dashboard/user-dashboard.module'; // เพิ่ม import
 
@@ -72,7 +71,6 @@ import { StudentProgressModule } from './student-progress/student-progress.modul
     TopicsModule,
     CategoriesModule,
     CATModule,
-    MSTModule,
     MailModule,
     SchedulesModule,
     NewsModule,

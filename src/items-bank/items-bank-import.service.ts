@@ -288,9 +288,9 @@ export class ItemsBankImportService {
           situation_id: currentSituation ? currentSituation.situation_id : null,
           status: 'active',
           question_image_url: questionImageUrl || '',
-          irt_a_discrimination: 1.0,
-          irt_b_difficulty: 0.0,
-          irt_c_guessing: 0.20,
+          irt_a_discrimination: null,
+          irt_b_difficulty: null,
+          irt_c_guessing: null,
         });
         const savedItem = await queryRunner.manager.save(item);
 

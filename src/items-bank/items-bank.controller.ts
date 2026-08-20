@@ -232,6 +232,33 @@ export class ItemsBankController {
   }
 
   /**
+   * ส่งออก Response Matrix (0/1 Matrix CSV) จากการทำข้อสอบปกติ
+   */
+  @Get('cat/export-response-matrix')
+  exportResponseMatrix(@Query('item_bank_id') itemBankId?: string) {
+    const bankId = itemBankId && !isNaN(+itemBankId) && +itemBankId > 0 ? +itemBankId : undefined;
+    return this.irtManagementService.exportResponseMatrix(bankId);
+  }
+
+  /**
+   * คำนวณสถิติ CTT และค่าประมาณการ IRT (a, b, c) จากประวัติการสอบจริง
+   */
+  @Get('cat/auto-calibration-stats')
+  getAutoCalibrationStats(@Query('item_bank_id') itemBankId?: string) {
+    const bankId = itemBankId && !isNaN(+itemBankId) && +itemBankId > 0 ? +itemBankId : undefined;
+    return this.irtManagementService.getAutoCalibrationStats(bankId);
+  }
+
+  /**
+   * นำเข้าและอัปเดต IRT parameters จากไฟล์ Calibrated CSV/JSON
+   */
+  @Post('cat/import-calibrated-irt')
+  importCalibratedIRT(@Body() body: any) {
+    const updates = Array.isArray(body) ? body : body.updates || [];
+    return this.irtManagementService.importCalibratedIRT(updates);
+  }
+
+  /**
    * ดึงข้อมูล Dashboard ของ Item Bank
    */
   @Get(':id/dashboard')
@@ -239,3 +266,4 @@ export class ItemsBankController {
     return this.irtManagementService.getDashboardStats(+id);
   }
 }
+

@@ -22,13 +22,13 @@ export class Item {
     @Column({ type: 'text' })
     question_text: string;
 
-    @Column({ type: 'float4', nullable: true, default: 1.0 })
+    @Column({ type: 'float4', nullable: true, default: null })
     irt_a_discrimination?: number | null;
 
-    @Column({ type: 'float4', nullable: true, default: 0.0 })
+    @Column({ type: 'float4', nullable: true, default: null })
     irt_b_difficulty?: number | null;
 
-    @Column({ type: 'float4', nullable: true, default: 0.20 })
+    @Column({ type: 'float4', nullable: true, default: null })
     irt_c_guessing?: number | null;
 
     @Column({ type: 'text' })

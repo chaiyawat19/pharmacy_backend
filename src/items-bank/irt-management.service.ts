@@ -20,21 +20,7 @@ export class IrtManagementService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    try {
-      // Auto-set default IRT values (a=1.0, b=0.0, c=0.20) for any legacy or imported items missing valid IRT
-      await this.itemRepo
-        .createQueryBuilder()
-        .update(Item)
-        .set({
-          irt_a_discrimination: 1.0,
-          irt_b_difficulty: 0.0,
-          irt_c_guessing: 0.20,
-        })
-        .where('irt_a_discrimination IS NULL OR irt_a_discrimination <= 0 OR irt_b_difficulty IS NULL OR irt_c_guessing IS NULL')
-        .execute();
-    } catch (err) {
-      console.warn('Failed to auto-set default IRT parameters:', err);
-    }
+    // Keep uncalibrated items as null so administrators can calibrate them explicitly
   }
 
   // ==================== IRT / CAT Methods ====================
@@ -95,9 +81,9 @@ export class IrtManagementService implements OnModuleInit {
       item_id: bbi.item.item_id,
       question_text: bbi.item.question_text,
       question_image_url: bbi.item.question_image_url,
-      irt_a_discrimination: (bbi.item.irt_a_discrimination && bbi.item.irt_a_discrimination > 0) ? bbi.item.irt_a_discrimination : 1.0,
-      irt_b_difficulty: bbi.item.irt_b_difficulty ?? 0.0,
-      irt_c_guessing: bbi.item.irt_c_guessing ?? 0.20,
+      irt_a_discrimination: bbi.item.irt_a_discrimination ?? null,
+      irt_b_difficulty: bbi.item.irt_b_difficulty ?? null,
+      irt_c_guessing: bbi.item.irt_c_guessing ?? null,
       irt_calibrated: this.isValidIRTItem(bbi.item),
       explanation: bbi.item.explanation,
       status: bbi.item.status,
@@ -189,9 +175,9 @@ export class IrtManagementService implements OnModuleInit {
   async batchUpdateIRTParameters(updateData: {
     updates: Array<{
       item_id: number;
-      irt_a_discrimination: number;
-      irt_b_difficulty: number;
-      irt_c_guessing: number;
+      irt_a_discrimination?: number | null;
+      irt_b_difficulty?: number | null;
+      irt_c_guessing?: number | null;
     }>;
   }) {
     const results: {
@@ -208,10 +194,13 @@ export class IrtManagementService implements OnModuleInit {
           continue;
         }
 
+        const a = update.irt_a_discrimination !== undefined ? update.irt_a_discrimination : item.irt_a_discrimination;
+        const b = update.irt_b_difficulty !== undefined ? update.irt_b_difficulty : item.irt_b_difficulty;
+        const c = update.irt_c_guessing !== undefined ? update.irt_c_guessing : item.irt_c_guessing;
+
         if (
-          update.irt_a_discrimination <= 0 ||
-          update.irt_c_guessing < 0 ||
-          update.irt_c_guessing >= 1
+          (a != null && a <= 0) ||
+          (c != null && (c < 0 || c >= 1))
         ) {
           results.failed.push({ item_id: update.item_id, reason: 'IRT parameters ไม่ถูกต้อง' });
           continue;
@@ -220,9 +209,9 @@ export class IrtManagementService implements OnModuleInit {
         await this.itemRepo.update(
           { item_id: update.item_id },
           {
-            irt_a_discrimination: update.irt_a_discrimination,
-            irt_b_difficulty: update.irt_b_difficulty,
-            irt_c_guessing: update.irt_c_guessing,
+            irt_a_discrimination: a,
+            irt_b_difficulty: b,
+            irt_c_guessing: c,
           },
         );
 
@@ -401,6 +390,7 @@ export class IrtManagementService implements OnModuleInit {
   // ==================== Private Helpers ====================
 
   private isValidIRTItem(item: Item): boolean {
+    if (!item) return false;
     if (
       item.irt_a_discrimination == null ||
       item.irt_b_difficulty == null ||
@@ -422,24 +412,301 @@ export class IrtManagementService implements OnModuleInit {
 
   private getMissingIRTParams(item: Item): string[] {
     const missing: string[] = [];
-    if (
-      item.irt_a_discrimination == null ||
-      !isFinite(item.irt_a_discrimination) ||
-      item.irt_a_discrimination <= 0
-    ) {
-      missing.push('a (discrimination)');
+    if (!item) return ['irt_a_discrimination', 'irt_b_difficulty', 'irt_c_guessing'];
+    if (item.irt_a_discrimination == null || item.irt_a_discrimination <= 0) {
+      missing.push('irt_a_discrimination');
     }
-    if (item.irt_b_difficulty == null || !isFinite(item.irt_b_difficulty)) {
-      missing.push('b (difficulty)');
+    if (item.irt_b_difficulty == null) {
+      missing.push('irt_b_difficulty');
     }
-    if (
-      item.irt_c_guessing == null ||
-      !isFinite(item.irt_c_guessing) ||
-      item.irt_c_guessing < 0 ||
-      item.irt_c_guessing >= 1
-    ) {
-      missing.push('c (guessing)');
+    if (item.irt_c_guessing == null || item.irt_c_guessing < 0 || item.irt_c_guessing >= 1) {
+      missing.push('irt_c_guessing');
     }
     return missing;
   }
+
+  // ==================== Export & Calibration Methods ====================
+
+  /**
+   * ส่งออก Response Matrix (0/1 Matrix CSV) จากการทำข้อสอบปกติ
+   */
+  async exportResponseMatrix(itemBankId?: number) {
+    const query = this.examSessionRepo
+      .createQueryBuilder('session')
+      .leftJoinAndSelect('session.user', 'user')
+      .where('session.end_time IS NOT NULL')
+      .andWhere("session.session_type = 'NORMAL'");
+
+    if (itemBankId) {
+      query.andWhere('session.itemBankId = :itemBankId', { itemBankId });
+    }
+
+    const sessions = await query.orderBy('session.session_id', 'ASC').getMany();
+
+    // ดึง items ทั้งหมดที่อยู่ใน itemBankId (หรือทั้งหมด)
+    let itemBankItemsQuery = this.itemBankItemRepo
+      .createQueryBuilder('bbi')
+      .leftJoinAndSelect('bbi.item', 'item')
+      .leftJoinAndSelect('bbi.item_bank', 'item_bank');
+
+    if (itemBankId) {
+      itemBankItemsQuery = itemBankItemsQuery.where('bbi.item_bank_id = :itemBankId', { itemBankId });
+    }
+
+    const itemBankItems = await itemBankItemsQuery
+      .orderBy('bbi.item_bank_id', 'ASC')
+      .addOrderBy('bbi.display_order', 'ASC')
+      .getMany();
+
+    // Deduplicate item ids in order
+    const orderedItemIds: number[] = [];
+    const itemMap = new Map<number, any>();
+    for (const bbi of itemBankItems) {
+      if (bbi.item && !itemMap.has(bbi.item.item_id)) {
+        itemMap.set(bbi.item.item_id, bbi.item);
+        orderedItemIds.push(bbi.item.item_id);
+      }
+    }
+
+    // Build header: session_id, user_id, user_email, item_bank_id, total_score, submitted_at, item_<id1>, item_<id2>, ...
+    const itemHeaders = orderedItemIds.map((id) => `item_${id}`);
+    const headers = [
+      'session_id',
+      'user_id',
+      'user_email',
+      'item_bank_id',
+      'total_score',
+      'submitted_at',
+      ...itemHeaders,
+    ];
+
+    const rows: string[] = [headers.join(',')];
+    const matrixData: any[] = [];
+
+    for (const session of sessions) {
+      const respMap = new Map<number, number>(); // item_id -> 1 | 0
+      let responses = session.responses;
+      if (typeof responses === 'string') {
+        try {
+          responses = JSON.parse(responses);
+        } catch {
+          responses = [];
+        }
+      }
+      if (Array.isArray(responses)) {
+        for (const resp of responses) {
+          if (resp && resp.item_id != null) {
+            respMap.set(Number(resp.item_id), resp.is_correct ? 1 : 0);
+          }
+        }
+      }
+
+      const itemValues = orderedItemIds.map((id) => {
+        if (respMap.has(id)) {
+          return respMap.get(id)!.toString();
+        }
+        return 'NA';
+      });
+
+      const submittedAtStr = session.end_time
+        ? `"${new Date(session.end_time).toISOString()}"`
+        : '';
+
+      const row = [
+        session.session_id,
+        session.userId,
+        `"${(session.user?.email || '').replace(/"/g, '""')}"`,
+        session.itemBankId || '',
+        session.final_score ?? '',
+        submittedAtStr,
+        ...itemValues,
+      ];
+      rows.push(row.join(','));
+
+      const sessionObj: any = {
+        session_id: session.session_id,
+        user_id: session.userId,
+        user_email: session.user?.email,
+        item_bank_id: session.itemBankId,
+        total_score: session.final_score,
+        submitted_at: session.end_time,
+        responses: {},
+      };
+      orderedItemIds.forEach((id) => {
+        sessionObj.responses[`item_${id}`] = respMap.has(id) ? respMap.get(id) : null;
+      });
+      matrixData.push(sessionObj);
+    }
+
+    return {
+      csv: rows.join('\n'),
+      total_sessions: sessions.length,
+      total_items: orderedItemIds.length,
+      item_ids: orderedItemIds,
+      matrix: matrixData,
+    };
+  }
+
+  /**
+   * คำนวณสถิติ CTT และค่าประมาณการ IRT (a, b, c) จากประวัติการสอบจริง
+   */
+  async getAutoCalibrationStats(itemBankId?: number) {
+    const query = this.examSessionRepo
+      .createQueryBuilder('session')
+      .where('session.end_time IS NOT NULL')
+      .andWhere("session.session_type = 'NORMAL'");
+
+    if (itemBankId) {
+      query.andWhere('session.itemBankId = :itemBankId', { itemBankId });
+    }
+
+    const sessions = await query.getMany();
+
+    // ดึง items
+    let itemBankItemsQuery = this.itemBankItemRepo
+      .createQueryBuilder('bbi')
+      .leftJoinAndSelect('bbi.item', 'item')
+      .leftJoinAndSelect('bbi.item_bank', 'item_bank');
+
+    if (itemBankId) {
+      itemBankItemsQuery = itemBankItemsQuery.where('bbi.item_bank_id = :itemBankId', { itemBankId });
+    }
+
+    const itemBankItems = await itemBankItemsQuery
+      .orderBy('bbi.item_bank_id', 'ASC')
+      .addOrderBy('bbi.display_order', 'ASC')
+      .getMany();
+
+    // เก็บข้อมูลคะแนนรวมของผู้สอบทุกคน
+    const sessionScores: number[] = sessions.map((s) => Number(s.final_score || 0));
+    const meanTotalScore =
+      sessionScores.length > 0
+        ? sessionScores.reduce((acc, v) => acc + v, 0) / sessionScores.length
+        : 50;
+
+    const stdTotalScore =
+      sessionScores.length > 1
+        ? Math.sqrt(
+            sessionScores.reduce((acc, v) => acc + Math.pow(v - meanTotalScore, 2), 0) /
+              (sessionScores.length - 1),
+          )
+        : 15;
+
+    // สำหรับแต่ละข้อ รวบรวม responses
+    const itemStatsMap = new Map<
+      number,
+      {
+        totalAttempts: number;
+        correctAttempts: number;
+        correctScores: number[];
+      }
+    >();
+
+    for (const session of sessions) {
+      let responses = session.responses;
+      if (typeof responses === 'string') {
+        try {
+          responses = JSON.parse(responses);
+        } catch {
+          responses = [];
+        }
+      }
+      if (Array.isArray(responses)) {
+        for (const resp of responses) {
+          if (!resp || resp.item_id == null) continue;
+          const itemId = Number(resp.item_id);
+          if (!itemStatsMap.has(itemId)) {
+            itemStatsMap.set(itemId, {
+              totalAttempts: 0,
+              correctAttempts: 0,
+              correctScores: [],
+            });
+          }
+          const stat = itemStatsMap.get(itemId)!;
+          stat.totalAttempts++;
+          if (resp.is_correct) {
+            stat.correctAttempts++;
+            stat.correctScores.push(Number(session.final_score || 0));
+          }
+        }
+      }
+    }
+
+    const itemsResults: any[] = [];
+
+    for (const bbi of itemBankItems) {
+      if (!bbi.item) continue;
+      const item = bbi.item;
+      const stat = itemStatsMap.get(item.item_id) || {
+        totalAttempts: 0,
+        correctAttempts: 0,
+        correctScores: [],
+      };
+
+      const N = stat.totalAttempts;
+      const R = stat.correctAttempts;
+      const p = N > 0 ? R / N : 0.5; // p-value (difficulty)
+
+      // Point-Biserial Correlation (r_pb)
+      let r_pb = 0.3;
+      if (N >= 5 && R > 0 && R < N && stdTotalScore > 0) {
+        const meanCorrect = stat.correctScores.reduce((a, b) => a + b, 0) / R;
+        r_pb = ((meanCorrect - meanTotalScore) / stdTotalScore) * Math.sqrt(p * (1 - p));
+        r_pb = Math.max(-0.99, Math.min(0.99, r_pb));
+      }
+
+      // IRT Estimation (CTT to IRT Approximation)
+      const clampedP = Math.max(0.02, Math.min(0.98, p));
+      let estimated_b = Math.log((1 - clampedP) / clampedP);
+      estimated_b = Math.round(Math.max(-3.5, Math.min(3.5, estimated_b)) * 100) / 100;
+
+      let estimated_a = 1.0;
+      if (r_pb > 0.05) {
+        const denom = Math.sqrt(Math.max(0.05, 1 - Math.pow(r_pb, 2)));
+        estimated_a = (1.7 * r_pb) / denom;
+        estimated_a = Math.round(Math.max(0.3, Math.min(2.5, estimated_a)) * 100) / 100;
+      } else if (r_pb <= 0) {
+        estimated_a = 0.4;
+      }
+
+      const estimated_c = 0.20;
+
+      itemsResults.push({
+        item_id: item.item_id,
+        question_text: item.question_text,
+        item_bank_id: bbi.item_bank_id,
+        bank_name: bbi.item_bank?.bank_name,
+        attempts: N,
+        correct_count: R,
+        p_value: Math.round(p * 1000) / 1000,
+        r_pb: Math.round(r_pb * 1000) / 1000,
+        current_a: item.irt_a_discrimination ?? null,
+        current_b: item.irt_b_difficulty ?? null,
+        current_c: item.irt_c_guessing ?? null,
+        estimated_a,
+        estimated_b,
+        estimated_c,
+        data_quality: N >= 30 ? 'HIGH' : N >= 10 ? 'MEDIUM' : N > 0 ? 'LOW' : 'NO_DATA',
+      });
+    }
+
+    return {
+      total_sessions: sessions.length,
+      total_items: itemsResults.length,
+      items: itemsResults,
+    };
+  }
+
+  /**
+   * นำเข้าและอัปเดต IRT parameters จากไฟล์ Calibrated CSV/JSON
+   */
+  async importCalibratedIRT(updates: Array<{
+    item_id: number;
+    irt_a_discrimination?: number | null;
+    irt_b_difficulty?: number | null;
+    irt_c_guessing?: number | null;
+  }>) {
+    return this.batchUpdateIRTParameters({ updates });
+  }
 }
+

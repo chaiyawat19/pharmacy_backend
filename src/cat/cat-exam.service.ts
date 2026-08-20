@@ -916,11 +916,11 @@ export class CATExamService {
      */
     async getAdminAnalytics() {
         const sessions = await this.catSessionRepo.find({
-            relations: ['base_session'],
+            relations: ['base_session', 'base_session.user'],
         });
 
         // เฉพาะที่จบแล้ว
-        const completedSessions = sessions.filter(s => s.base_session.end_time);
+        const completedSessions = sessions.filter(s => s.base_session?.end_time);
 
         const total = completedSessions.length;
         const passed = completedSessions.filter(s => s.passed).length;
@@ -960,6 +960,9 @@ export class CATExamService {
             .map(s => ({
                 session_id: Number(s.session_id),
                 user_id: s.base_session.userId,
+                user_name: s.base_session.user
+                    ? `${s.base_session.user.first_name} ${s.base_session.user.last_name || ''}`.trim()
+                    : `ผู้สอบ #${s.base_session.userId}`,
                 final_theta: s.final_theta,
                 final_se: s.final_se,
                 num_items: s.num_items,

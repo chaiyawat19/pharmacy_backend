@@ -152,9 +152,9 @@ export class ItemsBankService {
           explanation: qData.explanation || '',
           situation_id: savedSituation.situation_id,
           status: 'ACTIVE',
-          irt_a_discrimination: 1.0,
-          irt_b_difficulty: 0.0,
-          irt_c_guessing: 0.20,
+          irt_a_discrimination: null,
+          irt_b_difficulty: null,
+          irt_c_guessing: null,
         });
         const savedItem = await queryRunner.manager.save(item);
 
@@ -485,9 +485,9 @@ export class ItemsBankService {
         const item = queryRunner.manager.create(Item, {
           ...itemData,
           situation_id: savedSituation ? savedSituation.situation_id : null,
-          irt_a_discrimination: itemData.irt_a_discrimination ?? 1.0,
-          irt_b_difficulty: itemData.irt_b_difficulty ?? 0.0,
-          irt_c_guessing: itemData.irt_c_guessing ?? 0.20,
+          irt_a_discrimination: itemData.irt_a_discrimination ?? null,
+          irt_b_difficulty: itemData.irt_b_difficulty ?? null,
+          irt_c_guessing: itemData.irt_c_guessing ?? null,
         });
         const savedItem = await queryRunner.manager.save(item);
 
@@ -589,9 +589,9 @@ export class ItemsBankService {
         const item = queryRunner.manager.create(Item, {
           ...itemData,
           situation_id: situation_id,
-          irt_a_discrimination: itemData.irt_a_discrimination ?? 1.0,
-          irt_b_difficulty: itemData.irt_b_difficulty ?? 0.0,
-          irt_c_guessing: itemData.irt_c_guessing ?? 0.20,
+          irt_a_discrimination: itemData.irt_a_discrimination ?? null,
+          irt_b_difficulty: itemData.irt_b_difficulty ?? null,
+          irt_c_guessing: itemData.irt_c_guessing ?? null,
         });
         const savedItem = await queryRunner.manager.save(item);
 
