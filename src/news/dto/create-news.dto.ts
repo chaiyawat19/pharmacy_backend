@@ -23,6 +23,10 @@ export class CreateNewsDto {
 
   @IsString()
   @IsOptional()
+  source_url?: string;
+
+  @IsString()
+  @IsOptional()
   status?: string;
 
   // 💡 สำหรับอาร์เรย์ตัวเลข (เช่น [1, 2, 3]) ต้องระบุให้ชัดเจน เพื่อให้ระบบ transform ทำงานถูกตัว

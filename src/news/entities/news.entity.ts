@@ -27,6 +27,9 @@ export class NewsArticle {
   @Column({ type: 'varchar', length: 255, nullable: true })
   cover_image_url: string;
 
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  source_url: string;
+
   @Column({ type: 'varchar', length: 50, default: 'DRAFT' })
   status: string;
 
