@@ -1984,28 +1984,22 @@ export class ItemsBankService {
 
     // 3. ดึงจำนวนครั้งที่มีผู้เข้าสอบ (Sessions)
     const totalAttempts = await this.examSessionRepo.count({
-      where: { itemBankId: itemBankId, end_time: In([(null as any), undefined]) ? undefined : undefined } // Count all attempts or completed only? Let's count all valid sessions first. actually let's filter completed items for stats
+      where: { itemBankId: itemBankId }
     });
 
-    // Count only completed sessions for score stats
-    const completedSessions = await this.examSessionRepo.find({
-      where: { itemBankId: itemBankId, end_time: In([(null as any)]) ? undefined : undefined }, // This query needs to check NOT NULL for end_time. TypeORM shorthand for NOT NULL is simply not providing null, but let's be explicit with query builder if needed.
-      // Simplify: find all and filter in memory or use query builder. Query builder is better.
+    const completedSessionsData = await this.examSessionRepo.find({
+      where: {
+        itemBankId: itemBankId,
+        end_time: Not(IsNull()),
+      },
     });
-
-    // Find completed sessions using query builder for better performance and correctness
-    const completedSessionsBuilder = this.examSessionRepo.createQueryBuilder('session')
-      .where('session.itemBankId = :itemBankId', { itemBankId })
-      .andWhere('session.end_time IS NOT NULL');
-
-    const completedCount = await completedSessionsBuilder.getCount();
-    const completedSessionsData = await completedSessionsBuilder.getMany();
+    const completedCount = completedSessionsData.length;
 
     // 4. คำนวณคะแนนเฉลี่ย
     let averageScore = 0;
     let maxScore = 0;
     let minScore = 0;
-    let passCount = 0; // สมมติเกณฑ์ผ่าน 60%
+    let passCount = 0;
 
     // Score distribution (range of 10)
     const scoreDistribution = Array(10).fill(0).map((_, i) => ({
@@ -2014,20 +2008,27 @@ export class ItemsBankService {
     }));
 
     if (completedCount > 0) {
-      const scores = completedSessionsData.map(s => s.final_score);
-      const sumScore = scores.reduce((a, b) => a + b, 0);
-      averageScore = sumScore / completedCount;
-      maxScore = Math.max(...scores);
-      minScore = Math.min(...scores);
+      const scores = completedSessionsData
+        .map(s => (s.final_score != null ? Number(s.final_score) : null))
+        .filter((s): s is number => s !== null && !isNaN(s));
 
-      const passThreshold = 50; // 50%
-      passCount = scores.filter(s => s >= passThreshold).length;
+      if (scores.length > 0) {
+        const sumScore = scores.reduce((a, b) => a + b, 0);
+        averageScore = sumScore / scores.length;
+        maxScore = Math.max(...scores);
+        minScore = Math.min(...scores);
 
-      // Calculate distribution
-      scores.forEach(score => {
-        const index = Math.min(Math.floor(score / 10), 9);
-        scoreDistribution[index].count++;
-      });
+        const passThreshold = 50; // 50%
+        passCount = scores.filter(s => s >= passThreshold).length;
+
+        // Calculate distribution
+        scores.forEach(score => {
+          const index = Math.min(Math.floor(score / 10), 9);
+          if (index >= 0 && index < 10) {
+            scoreDistribution[index].count++;
+          }
+        });
+      }
     }
 
     const passRate = completedCount > 0 ? (passCount / completedCount) * 100 : 0;

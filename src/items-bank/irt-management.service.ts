@@ -290,13 +290,13 @@ export class IrtManagementService implements OnModuleInit {
     const totalItems = await this.itemBankItemRepo.count({ where: { item_bank_id: itemBankId } });
     const totalAttempts = await this.examSessionRepo.count({ where: { itemBankId: itemBankId } });
 
-    const completedSessionsBuilder = this.examSessionRepo
-      .createQueryBuilder('session')
-      .where('session.itemBankId = :itemBankId', { itemBankId })
-      .andWhere('session.end_time IS NOT NULL');
-
-    const completedCount = await completedSessionsBuilder.getCount();
-    const completedSessionsData = await completedSessionsBuilder.getMany();
+    const completedSessionsData = await this.examSessionRepo.find({
+      where: {
+        itemBankId: itemBankId,
+        end_time: Not(IsNull()),
+      },
+    });
+    const completedCount = completedSessionsData.length;
 
     let averageScore = 0;
     let maxScore = 0;
@@ -308,16 +308,23 @@ export class IrtManagementService implements OnModuleInit {
       .map((_, i) => ({ range: `${i * 10}-${(i + 1) * 10}%`, count: 0 }));
 
     if (completedCount > 0) {
-      const scores = completedSessionsData.map((s) => s.final_score);
-      const sumScore = scores.reduce((a, b) => a + b, 0);
-      averageScore = sumScore / completedCount;
-      maxScore = Math.max(...scores);
-      minScore = Math.min(...scores);
-      passCount = scores.filter((s) => s >= 50).length;
-      scores.forEach((score) => {
-        const index = Math.min(Math.floor(score / 10), 9);
-        scoreDistribution[index].count++;
-      });
+      const scores = completedSessionsData
+        .map((s) => (s.final_score != null ? Number(s.final_score) : null))
+        .filter((s): s is number => s !== null && !isNaN(s));
+
+      if (scores.length > 0) {
+        const sumScore = scores.reduce((a, b) => a + b, 0);
+        averageScore = sumScore / scores.length;
+        maxScore = Math.max(...scores);
+        minScore = Math.min(...scores);
+        passCount = scores.filter((s) => s >= 50).length;
+        scores.forEach((score) => {
+          const index = Math.min(Math.floor(score / 10), 9);
+          if (index >= 0 && index < 10) {
+            scoreDistribution[index].count++;
+          }
+        });
+      }
     }
 
     const passRate = completedCount > 0 ? (passCount / completedCount) * 100 : 0;
