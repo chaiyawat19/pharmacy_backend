@@ -10,6 +10,10 @@ export class CreateScheduleDto {
   description?: string;
 
   @IsString()
+  @IsOptional()
+  link_url?: string;
+
+  @IsString()
   @IsNotEmpty()
   startDate: string;
 

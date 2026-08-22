@@ -18,6 +18,9 @@ export class Schedule {
   @Column({ nullable: true })
   description: string;
 
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  link_url?: string;
+
   @Column({ type: 'timestamp' })
   start_time: Date;
 

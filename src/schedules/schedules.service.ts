@@ -160,6 +160,7 @@ export class SchedulesService {
     const newSchedule = this.scheduleRepo.create({
       title: createScheduleDto.title,
       description: createScheduleDto.description,
+      link_url: createScheduleDto.link_url,
       start_time: start,
       end_time: end,
       type_event: typeEvent,

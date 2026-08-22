@@ -10,5 +10,9 @@ export class CreateNoteDto {
   content: string;
 
   @IsOptional()
+  @IsString()
+  link_url?: string;
+
+  @IsOptional()
   tagIds?: any; // รองรับ string, string[] และ number[]
 }

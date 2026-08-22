@@ -11,6 +11,10 @@ export class UpdateScheduleDto {
 
   @IsString()
   @IsOptional()
+  link_url?: string;
+
+  @IsString()
+  @IsOptional()
   startDate?: string;
 
   @IsString()

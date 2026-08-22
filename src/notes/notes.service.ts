@@ -24,12 +24,13 @@ export class NotesService {
   ) {}
 
   async create(createNoteDto: CreateNoteDto, userId: number, files: Express.Multer.File[]) {
-    const { title, content, tagIds = [] } = createNoteDto;
+    const { title, content, link_url, tagIds = [] } = createNoteDto;
 
     const note = await this.noteRepository.save(
       this.noteRepository.create({
         title,
         content,
+        link_url,
         user_id: userId,
       }),
     );
@@ -82,7 +83,7 @@ export class NotesService {
     userId: number,
     files?: Express.Multer.File[],
   ) {
-    const { title, content, tagIds } = updateNoteDto;
+    const { title, content, link_url, tagIds } = updateNoteDto;
 
     const deletedFilesRaw = (updateNoteDto as any).deletedFiles;
     let deletedFileIds: any[] = [];
@@ -100,6 +101,7 @@ export class NotesService {
     await this.noteRepository.update(id, {
       ...(title !== undefined && { title }),
       ...(content !== undefined && { content }),
+      ...(link_url !== undefined && { link_url }),
     });
 
     if (tagIds !== undefined) {
