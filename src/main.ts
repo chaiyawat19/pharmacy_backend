@@ -8,6 +8,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ServerOptions } from 'socket.io';
 import helmet from 'helmet';
 import dns from 'dns';
+import { DataSource } from 'typeorm';
 
 // บังคับให้ Node แก้ DNS เป็น IPv4 ก่อน (Pinecone/Gemini ใช้ IPv4 เป็นหลัก)
 // ต้อง set ไว้ที่นี่ (ในโค้ด) เพราะ NODE_OPTIONS ใน .env จะถูกโหลดช้าเกินไป —
@@ -35,6 +36,37 @@ class CustomIoAdapter extends IoAdapter {
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // ── Auto-sync PostgreSQL primary key sequences ────────────────────────────
+  try {
+    const dataSource = app.get(DataSource);
+    if (dataSource && dataSource.isInitialized) {
+      await dataSource.query(`
+        DO $$
+        DECLARE
+            r RECORD;
+        BEGIN
+            FOR r IN (
+                SELECT 
+                    c.relname AS table_name,
+                    a.attname AS column_name,
+                    s.relname AS sequence_name
+                FROM pg_class s
+                JOIN pg_depend d ON d.objid = s.oid
+                JOIN pg_class c ON c.oid = d.refobjid
+                JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.refobjsubid
+                WHERE s.relkind = 'S'
+            ) LOOP
+                EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM %I), 0) + 1, false)', 
+                    r.sequence_name, r.column_name, r.table_name);
+            END LOOP;
+        END $$;
+      `);
+      console.log('✅ PostgreSQL database sequences synchronized successfully.');
+    }
+  } catch (err: any) {
+    console.warn('⚠️ Could not sync PostgreSQL sequences:', err?.message);
+  }
 
   // ── S2.3: Helmet — HTTP Security Headers ──────────────────────────────────
   // ปิด contentSecurityPolicy เพื่อไม่ให้ขัด API responses
