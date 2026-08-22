@@ -219,7 +219,7 @@ export class ChatbotDocumentsService {
         const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
         // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
-        const batchSize = 50; 
+        const batchSize = 25; 
         for (let i = 0; i < chunks.length; i += batchSize) {
           const chunkBatch = chunks.slice(i, i + batchSize);
           
@@ -228,8 +228,30 @@ export class ChatbotDocumentsService {
               outputDimensionality: 768
           }));
 
-          const result = await embeddingModel.batchEmbedContents({ requests });
-          const embeddings = result.embeddings;
+          // ส่ง batch พร้อม retry แบบ exponential backoff หากติด rate limit
+          let embeddings: any[] = [];
+          let attempts = 0;
+          const maxAttempts = 3;
+          while (attempts < maxAttempts) {
+            try {
+              const result = await embeddingModel.batchEmbedContents({ requests });
+              embeddings = result.embeddings || [];
+              break;
+            } catch (embedError: any) {
+              attempts++;
+              const errStr = embedError?.message || String(embedError);
+              if (
+                attempts < maxAttempts &&
+                (errStr.includes('429') || errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('too many requests'))
+              ) {
+                const waitTime = attempts * 2000;
+                this.logger.warn(`Gemini batch embed attempt ${attempts} hit rate limit, retrying in ${waitTime}ms...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+              } else {
+                throw embedError;
+              }
+            }
+          }
 
           const vectors = (embeddings || []).map((emb, idx) => {
             let finalValues: number[] = [];
@@ -261,7 +283,7 @@ export class ChatbotDocumentsService {
 
           // พักระหว่าง batch เล็กน้อย เพื่อลดโอกาสชน Rate Limit
           if (i + batchSize < chunks.length) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 800));
           }
         }
       }
@@ -277,11 +299,15 @@ export class ChatbotDocumentsService {
         try { fs.unlinkSync(fullPath); } catch {}
       }
 
+      // Cleanup Pinecone namespace safely (404 is normal if no vectors were upserted)
       if (this.pineconeIndex) {
         try {
           await this.pineconeIndex.namespace(`doc-${savedDoc.id}`).deleteAll();
-        } catch (cleanupError) {
-          this.logger.error(`Failed to cleanup Pinecone namespace for document ${savedDoc.id}:`, cleanupError);
+        } catch (cleanupError: any) {
+          const cleanMsg = cleanupError?.message || String(cleanupError);
+          if (!cleanMsg.includes('404') && !cleanupError?.name?.includes('NotFound')) {
+            this.logger.warn(`Pinecone cleanup warning for document ${savedDoc.id}: ${cleanMsg}`);
+          }
         }
       }
       
@@ -349,8 +375,11 @@ export class ChatbotDocumentsService {
       try {
         await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
         this.logger.log(`Deleted all vectors in namespace doc-${id}`);
-      } catch (error) {
-        this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
+      } catch (error: any) {
+        const msg = error?.message || String(error);
+        if (!msg.includes('404') && !error?.name?.includes('NotFound')) {
+          this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
+        }
       }
     }
 
