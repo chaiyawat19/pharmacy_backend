@@ -4,14 +4,13 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
 
 @Entity('chatbot_documents')
 export class ChatbotDocument {
-  // จำเป็นต้องมี Primary Key สำหรับ TypeORM 
-  // แนะนำให้เพิ่ม column 'id' เป็น serial/bigserial ในตารางด้วยครับ
   @PrimaryGeneratedColumn()
   id: number;
 
@@ -20,6 +19,12 @@ export class ChatbotDocument {
 
   @Column({ type: 'varchar', nullable: true })
   file_size: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  file_url: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  file_path: string;
 
   @Column({ type: 'bigint', nullable: true })
   uploaded_by: number;
@@ -30,4 +35,7 @@ export class ChatbotDocument {
 
   @CreateDateColumn({ type: 'timestamp without time zone', nullable: true })
   uploaded_at: Date;
+
+  @DeleteDateColumn({ type: 'timestamp without time zone', nullable: true })
+  deleted_at: Date | null;
 }

@@ -1,13 +1,30 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not, IsNull, In } from 'typeorm';
 import { ChatbotDocument } from '../chat/entities/chatbot_document.entity';
 import { User } from '../users/entities/user.entity';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as ExcelJS from 'exceljs';
 
 // Pinecone & Gemini
 import { Pinecone } from '@pinecone-database/pinecone';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 const pdfParse = require('pdf-parse');
+
+function getContentTypeByFileName(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  switch (ext) {
+    case 'pdf': return 'application/pdf';
+    case 'txt': return 'text/plain; charset=utf-8';
+    case 'csv': return 'text/csv; charset=utf-8';
+    case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'doc': return 'application/msword';
+    case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case 'xls': return 'application/vnd.ms-excel';
+    default: return 'application/octet-stream';
+  }
+}
 
 @Injectable()
 export class ChatbotDocumentsService {
@@ -20,7 +37,7 @@ export class ChatbotDocumentsService {
     @InjectRepository(ChatbotDocument)
     private readonly chatbotDocumentRepo: Repository<ChatbotDocument>,
   ) {
-    // ตรวจสอบ env vars ตั้งแต่เริ่มต้น (ถ้าขาดจะได้ error ชัดเจน แทนที่จะใช้ placeholder แล้ว fail ลึกลับ)
+    // ตรวจสอบ env vars ตั้งแต่เริ่มต้น
     const requiredEnv: [string, string | undefined][] = [
       ['GEMINI_API_KEY', process.env.GEMINI_API_KEY],
       ['PINECONE_API_KEY', process.env.PINECONE_API_KEY],
@@ -31,21 +48,22 @@ export class ChatbotDocumentsService {
       .map(([name]) => name);
 
     if (missing.length > 0) {
-      throw new Error(
+      this.logger.warn(
         `ChatbotDocumentsService: missing environment variable(s): ${missing.join(', ')}. ` +
         `กรุณาตั้งค่าใน Railway Dashboard → Variables ก่อนใช้งานฟีเจอร์นี้`,
       );
     }
 
-    // กำหนดค่า API Keys
-    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
+    if (process.env.GEMINI_API_KEY) {
+      this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
+    }
 
-    this.pinecone = new Pinecone({
-      apiKey: process.env.PINECONE_API_KEY as string,
-    });
-
-    // ตรวจสอบว่ามี Index ใน Pinecone ตั้งค่า Dimension = 768 (สำหรับ Gemini)
-    this.pineconeIndex = this.pinecone.index(process.env.PINECONE_INDEX as string);
+    if (process.env.PINECONE_API_KEY && process.env.PINECONE_INDEX) {
+      this.pinecone = new Pinecone({
+        apiKey: process.env.PINECONE_API_KEY as string,
+      });
+      this.pineconeIndex = this.pinecone.index(process.env.PINECONE_INDEX as string);
+    }
   }
 
   // Helper สำหรับตัดข้อความเป็นก้อนๆ (Chunking) เพื่อให้ RAG ทำงานได้ดีที่สุด
@@ -59,6 +77,53 @@ export class ChatbotDocumentsService {
     return chunks;
   }
 
+  // Helper สำหรับสกัดข้อความจากประเภทไฟล์ต่างๆ (PDF, TXT, CSV, DOCX, DOC, XLSX, XLS)
+  private async extractTextFromFile(file: Express.Multer.File, ext: string): Promise<string> {
+    if (ext === 'pdf') {
+      const parseFunction = typeof pdfParse === 'function' ? pdfParse : (pdfParse.PDFParse || pdfParse.default);
+      const pdfData = await parseFunction(file.buffer);
+      return pdfData.text.replace(/\n/g, ' ').trim();
+    }
+
+    if (ext === 'txt' || ext === 'csv') {
+      return file.buffer.toString('utf-8').trim();
+    }
+
+    if (ext === 'docx' || ext === 'doc') {
+      try {
+        const mammoth = require('mammoth');
+        const result = await mammoth.extractRawText({ buffer: file.buffer });
+        return result.value.replace(/\n/g, ' ').trim();
+      } catch (e) {
+        this.logger.warn(`Mammoth docx parse failed, fallback text: ${e}`);
+        return file.buffer.toString('utf-8').replace(/[^\x20-\x7E\u0E00-\u0E7F\n]/g, ' ').trim();
+      }
+    }
+
+    if (ext === 'xlsx' || ext === 'xls') {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(file.buffer as any);
+      const rowsText: string[] = [];
+      workbook.eachSheet((worksheet) => {
+        rowsText.push(`[แผ่นงาน: ${worksheet.name}]`);
+        worksheet.eachRow((row) => {
+          const values = Array.isArray(row.values)
+            ? row.values
+                .filter(v => v !== null && v !== undefined)
+                .map(v => typeof v === 'object' && v && 'text' in (v as any) ? (v as any).text : String(v))
+            : [];
+          if (values.length > 0) {
+            rowsText.push(values.join(' | '));
+          }
+        });
+      });
+      return rowsText.join('\n').trim();
+    }
+
+    // Generic fallback
+    return file.buffer.toString('utf-8').trim();
+  }
+
   async getAllDocuments(): Promise<ChatbotDocument[]> {
     return this.chatbotDocumentRepo.find({
       order: { uploaded_at: 'DESC' },
@@ -66,15 +131,70 @@ export class ChatbotDocumentsService {
     });
   }
 
-  async uploadAndProcessDocument(file: Express.Multer.File, userId: number): Promise<ChatbotDocument> {
-    if (file.mimetype !== 'application/pdf') {
-      throw new BadRequestException('รองรับเฉพาะไฟล์ PDF เท่านั้น');
+  async getDeletedDocuments(): Promise<ChatbotDocument[]> {
+    return this.chatbotDocumentRepo.find({
+      withDeleted: true,
+      where: {
+        deleted_at: Not(IsNull())
+      },
+      order: { deleted_at: 'DESC' },
+      relations: ['user']
+    });
+  }
+
+  async getDocumentFile(id: number): Promise<{ buffer: Buffer; fileName: string; contentType: string }> {
+    const doc = await this.chatbotDocumentRepo.findOne({
+      where: { id },
+      withDeleted: true
+    });
+
+    if (!doc) {
+      throw new NotFoundException('ไม่พบเอกสารนี้ในระบบ');
     }
+
+    const contentType = getContentTypeByFileName(doc.file_name);
+
+    if (doc.file_path && fs.existsSync(doc.file_path)) {
+      const buffer = fs.readFileSync(doc.file_path);
+      return { buffer, fileName: doc.file_name, contentType };
+    }
+
+    if (doc.file_url) {
+      const fallbackPath = path.join(process.cwd(), doc.file_url.replace(/^\//, ''));
+      if (fs.existsSync(fallbackPath)) {
+        const buffer = fs.readFileSync(fallbackPath);
+        return { buffer, fileName: doc.file_name, contentType };
+      }
+    }
+
+    throw new NotFoundException('ไม่พบไฟล์เอกสารต้นฉบับบนเซิร์ฟเวอร์');
+  }
+
+  async uploadAndProcessDocument(file: Express.Multer.File, userId: number): Promise<ChatbotDocument> {
+    const cleanOriginalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    const ext = cleanOriginalName.split('.').pop()?.toLowerCase() || '';
+
+    const allowed = ['pdf', 'txt', 'csv', 'doc', 'docx', 'xls', 'xlsx'];
+    if (!allowed.includes(ext)) {
+      throw new BadRequestException(`รองรับเฉพาะไฟล์ ${allowed.map(e => '.' + e).join(', ')} เท่านั้น`);
+    }
+
+    // บันทึกไฟล์ลง Disk เพื่อเปิดอ่านและดาวน์โหลด
+    const uploadDir = path.join(process.cwd(), 'uploads', 'chatbot_docs');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const safeBaseName = cleanOriginalName.replace(/[^a-zA-Z0-9._\-ก-๙]/g, '_');
+    const savedFileName = `${Date.now()}-${safeBaseName}`;
+    const fullPath = path.join(uploadDir, savedFileName);
+    fs.writeFileSync(fullPath, file.buffer);
 
     // 1. สร้าง Record ในระบบเพื่อรับ ID อ้างอิง
     const doc = this.chatbotDocumentRepo.create({
-      file_name: Buffer.from(file.originalname, 'latin1').toString('utf8'), // ป้องกันชื่อไฟล์ภาษาไทยเพี้ยน
+      file_name: cleanOriginalName,
       file_size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
+      file_url: `/uploads/chatbot_docs/${savedFileName}`,
+      file_path: fullPath,
       uploaded_by: userId,
     });
     
@@ -82,73 +202,62 @@ export class ChatbotDocumentsService {
     const savedDoc = await this.chatbotDocumentRepo.save(doc);
 
     try {
-      this.logger.log(`Parsing PDF: ${savedDoc.file_name} (ID: ${savedDoc.id})`);
+      this.logger.log(`Parsing document: ${savedDoc.file_name} (${ext.toUpperCase()}) (ID: ${savedDoc.id})`);
       
-      // 2. แกะข้อความจากไฟล์ PDF
-      // จัดการเคสที่ pdf-parse อาจจะ export เป็น object แทนที่จะเป็นฟังก์ชัน
-      const parseFunction = typeof pdfParse === 'function' ? pdfParse : (pdfParse.PDFParse || pdfParse.default);
-      const pdfData = await parseFunction(file.buffer);
-      const rawText = pdfData.text.replace(/\n/g, ' ').trim(); // ทำความสะอาดข้อความ
+      // 2. แกะข้อความจากไฟล์ตามประเภท
+      const rawText = await this.extractTextFromFile(file, ext);
 
-      if (!rawText) {
-        throw new Error('ไม่พบข้อมูลข้อความในไฟล์ PDF นี้');
+      if (!rawText || rawText.trim().length === 0) {
+        throw new Error('ไม่พบข้อมูลข้อความในไฟล์นี้ หรือรูปแบบไฟล์ไม่สามารถอ่านข้อความได้');
       }
 
       // 3. หั่นไฟล์ (Chunking) เพื่อกระจายเข้า Vector DB
       const chunks = this.chunkText(rawText);
-      this.logger.log(`PDF parsed successfully. Separated into ${chunks.length} chunks.`);
+      this.logger.log(`Document parsed successfully. Separated into ${chunks.length} chunks.`);
 
-      // ใช้ model "gemini-embedding-001" ซึ่งรองรับ 768 dimensions
-      const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-001" });
+      if (this.genAI) {
+        const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
-      // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
-      const batchSize = 100; 
-      for (let i = 0; i < chunks.length; i += batchSize) {
-        const chunkBatch = chunks.slice(i, i + batchSize);
-        
-        // 4.1 ขอ Vector 768 Dimensions จาก Gemini (ใช้ batchEmbedContents)
-        // จัดรูปแบบ Request ทีละตัวใน Batch
-        const requests = chunkBatch.map(content => ({
-            content: { role: 'user', parts: [{ text: content }] },
-            outputDimensionality: 768 // ตรงกับ Pinecone Index ที่สร้างไว้ (768 dims)
-        }));
+        // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
+        const batchSize = 100; 
+        for (let i = 0; i < chunks.length; i += batchSize) {
+          const chunkBatch = chunks.slice(i, i + batchSize);
+          
+          const requests = chunkBatch.map(content => ({
+              content: { role: 'user', parts: [{ text: content }] },
+              outputDimensionality: 768
+          }));
 
-        const result = await embeddingModel.batchEmbedContents({ requests });
-        const embeddings = result.embeddings;
+          const result = await embeddingModel.batchEmbedContents({ requests });
+          const embeddings = result.embeddings;
 
-        // 4.2 แปลง embeddings เป็น vector records สำหรับ Pinecone
-        const vectors = (embeddings || []).map((emb, idx) => {
-          // ใช้ Array.from() เพื่อให้แน่ใจว่าเป็น plain number[] ไม่ใช่ Float32Array หรือ typed array
-          let finalValues: number[] = [];
-          if (emb.values) {
-            finalValues = Array.from(emb.values as any);
-          } else if (emb['embedding']?.values) {
-            finalValues = Array.from(emb['embedding'].values as any);
+          const vectors = (embeddings || []).map((emb, idx) => {
+            let finalValues: number[] = [];
+            if (emb.values) {
+              finalValues = Array.from(emb.values as any);
+            } else if (emb['embedding']?.values) {
+              finalValues = Array.from(emb['embedding'].values as any);
+            }
+
+            return {
+              id: `doc-${savedDoc.id}-chunk-${i + idx}`,
+              values: finalValues,
+              metadata: {
+                document_id: savedDoc.id,
+                file_name: savedDoc.file_name,
+                text: chunkBatch[idx],
+              },
+            };
+          });
+
+          const validVectors = vectors.filter(v => v.values && v.values.length > 0);
+          this.logger.log(`Batch ${(i / batchSize) + 1}: ${validVectors.length} valid vectors (${validVectors[0]?.values?.length ?? 0} dims each)`);
+
+          if (validVectors.length > 0 && this.pineconeIndex) {
+            const ns = this.pineconeIndex.namespace(`doc-${savedDoc.id}`);
+            await ns.upsert({ records: validVectors });
+            this.logger.log(`Upsert successful: Batch ${(i / batchSize) + 1} with ${validVectors.length} vectors into namespace doc-${savedDoc.id}`);
           }
-
-          return {
-            id: `doc-${savedDoc.id}-chunk-${i + idx}`,
-            values: finalValues,
-            metadata: {
-              document_id: savedDoc.id,
-              file_name: savedDoc.file_name,
-              text: chunkBatch[idx],
-            },
-          };
-        });
-
-        // กรองเฉพาะ vector ที่มีค่าจริงๆ
-        const validVectors = vectors.filter(v => v.values && v.values.length > 0);
-        this.logger.log(`Batch ${(i / batchSize) + 1}: ${validVectors.length} valid vectors (${validVectors[0]?.values?.length ?? 0} dims each)`);
-
-        if (validVectors.length > 0) {
-          // ใช้ namespace แยกต่อเอกสาร เพื่อให้ลบได้ง่ายด้วย deleteAll()
-          const ns = this.pineconeIndex.namespace(`doc-${savedDoc.id}`);
-          // SDK v7.x: upsert ต้องการ { records: [...] } ไม่ใช่ array โดยตรง
-          await ns.upsert({ records: validVectors });
-          this.logger.log(`Upsert successful: Batch ${(i / batchSize) + 1} with ${validVectors.length} vectors into namespace doc-${savedDoc.id}`);
-        } else {
-          this.logger.warn(`No valid vectors found for document ${savedDoc.id} in batch ${(i / batchSize) + 1}.`);
         }
       }
 
@@ -158,39 +267,105 @@ export class ChatbotDocumentsService {
     } catch (error) {
       this.logger.error(`Error processing document ${savedDoc.id}:`, error);
       
-      // Cleanup: หากพังกลางคัน ให้ลบ namespace ของเอกสารนี้ออกจาก Pinecone
-      try {
-        await this.pineconeIndex.namespace(`doc-${savedDoc.id}`).deleteAll();
-      } catch (cleanupError) {
-        this.logger.error(`Failed to cleanup Pinecone namespace for document ${savedDoc.id}:`, cleanupError);
+      // Cleanup file if processing fails
+      if (fs.existsSync(fullPath)) {
+        try { fs.unlinkSync(fullPath); } catch {}
+      }
+
+      if (this.pineconeIndex) {
+        try {
+          await this.pineconeIndex.namespace(`doc-${savedDoc.id}`).deleteAll();
+        } catch (cleanupError) {
+          this.logger.error(`Failed to cleanup Pinecone namespace for document ${savedDoc.id}:`, cleanupError);
+        }
       }
       
       await this.chatbotDocumentRepo.delete(savedDoc.id);
 
-      // แสดง error จริงให้เห็น (ตัดให้สั้น เพื่อให้ debug ผ่าน Railway logs ได้ ไม่ยัดยาวเกินไปลง response)
       const errorMessage = (error instanceof Error ? error.message : String(error)).slice(0, 300);
       throw new BadRequestException(
-        `เกิดข้อผิดพลาดในการประมวลผล PDF และเพิ่มเข้า Pinecone: ${errorMessage}`,
+        `เกิดข้อผิดพลาดในการประมวลผลเอกสารและเพิ่มเข้า Pinecone: ${errorMessage}`,
       );
     }
   }
 
-  async deleteDocument(id: number): Promise<{ success: boolean }> {
+  // ── Soft Delete ──
+  async softDeleteDocument(id: number): Promise<{ success: boolean }> {
     const doc = await this.chatbotDocumentRepo.findOneBy({ id });
     if (!doc) {
       throw new NotFoundException('ไม่พบเอกสารนี้ในระบบ');
     }
+    await this.chatbotDocumentRepo.softDelete(id);
+    return { success: true };
+  }
 
-    try {
-      // 1. ลบทุก vector ใน namespace ของเอกสารนี้ (รองรับ Pinecone Serverless)
-      await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
-      this.logger.log(`Deleted all vectors in namespace doc-${id}`);
-    } catch (error) {
-      this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
+  async softDeleteMultipleDocuments(ids: number[]): Promise<{ success: boolean; count: number }> {
+    if (!ids || ids.length === 0) return { success: true, count: 0 };
+    await this.chatbotDocumentRepo.softDelete({ id: In(ids) });
+    return { success: true, count: ids.length };
+  }
+
+  // ── Restore ──
+  async restoreDocument(id: number): Promise<{ success: boolean }> {
+    await this.chatbotDocumentRepo.restore(id);
+    return { success: true };
+  }
+
+  async restoreMultipleDocuments(ids: number[]): Promise<{ success: boolean; count: number }> {
+    if (!ids || ids.length === 0) return { success: true, count: 0 };
+    await this.chatbotDocumentRepo.restore({ id: In(ids) });
+    return { success: true, count: ids.length };
+  }
+
+  // ── Permanent Delete ──
+  async permanentDeleteDocument(id: number): Promise<{ success: boolean }> {
+    const doc = await this.chatbotDocumentRepo.findOne({
+      where: { id },
+      withDeleted: true
+    });
+
+    if (doc?.file_path && fs.existsSync(doc.file_path)) {
+      try { fs.unlinkSync(doc.file_path); } catch {}
     }
 
-    // 2. ลบออกจาก PostgreSQL ของเรา
+    if (this.pineconeIndex) {
+      try {
+        await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
+        this.logger.log(`Deleted all vectors in namespace doc-${id}`);
+      } catch (error) {
+        this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
+      }
+    }
+
     await this.chatbotDocumentRepo.delete(id);
     return { success: true };
+  }
+
+  async permanentDeleteMultipleDocuments(ids: number[]): Promise<{ success: boolean; count: number }> {
+    if (!ids || ids.length === 0) return { success: true, count: 0 };
+
+    const docs = await this.chatbotDocumentRepo.find({
+      where: { id: In(ids) },
+      withDeleted: true
+    });
+
+    for (const doc of docs) {
+      if (doc.file_path && fs.existsSync(doc.file_path)) {
+        try { fs.unlinkSync(doc.file_path); } catch {}
+      }
+    }
+
+    if (this.pineconeIndex) {
+      for (const id of ids) {
+        try {
+          await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
+        } catch (error) {
+          this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
+        }
+      }
+    }
+
+    await this.chatbotDocumentRepo.delete({ id: In(ids) });
+    return { success: true, count: ids.length };
   }
 }

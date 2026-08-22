@@ -48,6 +48,7 @@
     "exceljs": "^4.4.0",
     "helmet": "^8.2.0",
     "katex": "^0.16.27",
+    "mammoth": "^1.12.1",
     "nodemailer": "^7.0.12",
     "openai": "^6.33.0",
     "passport": "^0.7.0",
