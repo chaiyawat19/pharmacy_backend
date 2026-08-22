@@ -219,7 +219,7 @@ export class ChatbotDocumentsService {
         const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
         // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
-        const batchSize = 100; 
+        const batchSize = 50; 
         for (let i = 0; i < chunks.length; i += batchSize) {
           const chunkBatch = chunks.slice(i, i + batchSize);
           
@@ -258,6 +258,11 @@ export class ChatbotDocumentsService {
             await ns.upsert({ records: validVectors });
             this.logger.log(`Upsert successful: Batch ${(i / batchSize) + 1} with ${validVectors.length} vectors into namespace doc-${savedDoc.id}`);
           }
+
+          // พักระหว่าง batch เล็กน้อย เพื่อลดโอกาสชน Rate Limit
+          if (i + batchSize < chunks.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
         }
       }
 
@@ -282,7 +287,19 @@ export class ChatbotDocumentsService {
       
       await this.chatbotDocumentRepo.delete(savedDoc.id);
 
-      const errorMessage = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+      const errString = (error instanceof Error ? error.message : String(error));
+      if (
+        errString.includes('429') ||
+        errString.toLowerCase().includes('quota') ||
+        errString.toLowerCase().includes('too many requests') ||
+        errString.toLowerCase().includes('resource_exhausted')
+      ) {
+        throw new BadRequestException(
+          'ไม่สามารถอัปโหลดไฟล์ได้ในขณะนี้ เนื่องจากโมเดล AI ติดลิมิตชั่วคราว (Gemini Quota Exceeded) กรุณารอสักครู่ (ประมาณ 1-2 นาที) แล้วลองใหม่อีกครั้ง',
+        );
+      }
+
+      const errorMessage = errString.slice(0, 300);
       throw new BadRequestException(
         `เกิดข้อผิดพลาดในการประมวลผลเอกสารและเพิ่มเข้า Pinecone: ${errorMessage}`,
       );
