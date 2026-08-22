@@ -60,6 +60,12 @@ export class NotificationsController {
         return this.notificationsService.markAllAsRead(userId);
     }
 
+    @Delete('clear-all')
+    removeAll(@Request() req) {
+        const userId = req.user.userId;
+        return this.notificationsService.removeAll(userId);
+    }
+
     @Delete(':id')
     remove(@Param('id') id: string, @Request() req) {
         const userId = req.user.userId;

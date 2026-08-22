@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not, IsNull } from 'typeorm';
 import { Item } from './entities/items.entity';
 import { ItemBankItem } from './entities/item_bank_items.entity';
 import { ItemsBank } from './entities/items-bank.entity';
@@ -332,8 +332,11 @@ export class IrtManagementService implements OnModuleInit {
     }));
 
     const recentActivityRaw = await this.examSessionRepo.find({
-      where: { itemBankId },
-      order: { start_time: 'DESC' },
+      where: {
+        itemBankId,
+        end_time: Not(IsNull()),
+      },
+      order: { end_time: 'DESC' },
       take: 10,
       relations: ['user'],
     });
@@ -345,25 +348,20 @@ export class IrtManagementService implements OnModuleInit {
         if (!session.user) return `User #${session.userId}`;
         const fName = (session.user.first_name || '').trim();
         const lName = (session.user.last_name || '').trim();
-        if (!fName && !lName) return `User #${session.userId}`;
-        const maskedFirst = fName.length <= 2
-          ? (fName.charAt(0) || '*') + '*'.repeat(Math.max(1, fName.length - 1))
-          : fName.substring(0, 2) + '*'.repeat(Math.max(1, fName.length - 2));
-        const maskedLast = lName.length > 0
-          ? lName.charAt(0) + '*'.repeat(Math.max(1, lName.length - 1))
-          : '';
-        return maskedLast ? `${maskedFirst} ${maskedLast}` : maskedFirst;
+        const fullName = [fName, lName].filter(Boolean).join(' ');
+        return fullName || `User #${session.userId}`;
       })(),
       start_time: session.start_time,
       end_time: session.end_time,
-      score: session.final_score,
-      status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS',
+      score: session.final_score != null ? Math.round(Number(session.final_score) * 100) / 100 : null,
+      status: 'COMPLETED',
     }));
 
     return {
       item_bank: {
         id: bank.item_bank_id,
         name: bank.bank_name,
+        description: bank.description,
         created_at: bank.created_at,
         updated_at: bank.updated_at,
         duration: bank.duration,

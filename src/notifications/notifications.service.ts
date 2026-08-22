@@ -85,6 +85,11 @@ export class NotificationsService {
         return { message: 'All notifications marked as read' };
     }
 
+    async removeAll(userId: number) {
+        await this.notificationRepo.delete({ user_id: userId });
+        return { message: 'All notifications cleared successfully' };
+    }
+
     async remove(notificationId: number, userId: number) {
         const notification = await this.notificationRepo.findOne({
             where: { notification_id: notificationId, user_id: userId },

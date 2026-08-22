@@ -26,6 +26,8 @@ export interface QuotaInfo {
 export class ChatService {
     // ── In-memory Concurrent Request Lock ──
     private readonly activeUsers = new Set<number>();
+    // ── In-flight AbortControllers map: key = `${user_id}_${session_id}` ──
+    private readonly inFlightControllers = new Map<string, AbortController>();
 
     constructor(
         private readonly httpService: HttpService,
@@ -36,6 +38,30 @@ export class ChatService {
         @InjectRepository(Chat_quota)
         private readonly quotaRepo: Repository<Chat_quota>
     ) { }
+
+    /**
+     * ยกเลิกคำขอส่งข้อความที่กำลังประมวลผลอยู่ (Cancel in-flight request)
+     */
+    async cancelRequest(userId: number, sessionId?: number): Promise<{ success: boolean; message: string }> {
+        let cancelled = false;
+
+        // Cancel specific session or any active request of user
+        for (const [key, controller] of this.inFlightControllers.entries()) {
+            if (key.startsWith(`${userId}_`)) {
+                controller.abort();
+                this.inFlightControllers.delete(key);
+                cancelled = true;
+            }
+        }
+
+        // Release concurrent user lock
+        this.activeUsers.delete(userId);
+
+        return {
+            success: true,
+            message: cancelled ? 'Request cancelled successfully' : 'No active request to cancel'
+        };
+    }
 
     /**
      * คำนวณวันที่ปัจจุบันในรูปแบบ YYYY-MM-DD (ตาม Timezone ประเทศไทย UTC+7)
@@ -199,6 +225,9 @@ export class ChatService {
 
         // 3. ล็อค Concurrent Lock
         this.activeUsers.add(user_id);
+        const controller = new AbortController();
+        const inFlightKey = `${user_id}_${session_id || 'new'}`;
+        this.inFlightControllers.set(inFlightKey, controller);
 
         try {
             // 4. ตรวจสอบและหัก Dynamic Quota
@@ -218,12 +247,19 @@ export class ChatService {
                 sender_type: 'USER'
             });
 
+            // If cancelled before reaching N8N
+            if (controller.signal.aborted) {
+                return { user: savedUserMessage, cancelled: true };
+            }
+
             const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
             let botReply = '';
             const payload = { user_id, session_id, message };
 
             try {
-                const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
+                const response = await firstValueFrom(
+                    this.httpService.post(n8nUrl, payload, { signal: controller.signal })
+                );
                 const data = response.data;
 
                 if (data?.status === 'error') {
@@ -235,8 +271,25 @@ export class ChatService {
                 if (!botReply) {
                     botReply = response.data?.reply ?? '';
                 }
-            } catch (error) {
+            } catch (error: any) {
+                if (controller.signal.aborted || error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') {
+                    console.log(`[ChatService] N8N request was cancelled by user ${user_id}`);
+                    return {
+                        user: savedUserMessage,
+                        cancelled: true,
+                        quota: quotaInfo
+                    };
+                }
                 botReply = this.handleN8NError(error);
+            }
+
+            // Check again if cancelled before saving
+            if (controller.signal.aborted) {
+                return {
+                    user: savedUserMessage,
+                    cancelled: true,
+                    quota: quotaInfo
+                };
             }
 
             const savedBotMessage = await this.messageRepo.save({
@@ -251,12 +304,13 @@ export class ChatService {
                 quota: quotaInfo
             };
         } finally {
-            // ปลดล็อค Concurrent Lock เสมอ
+            // ปลดล็อค Concurrent Lock & cleanup controller
             this.activeUsers.delete(user_id);
+            this.inFlightControllers.delete(inFlightKey);
         }
     }
 
-    // ดึงข้อมูลแชททั้งหมดภายใน session
+    // ดึงข้อมูลแชตทั้งหมดภายใน session
     async getMessages(session_id: number) {
         return this.messageRepo.find({
             where: { chat_session_id: session_id },

@@ -12,6 +12,13 @@ export class ChatController {
     return this.chatService.getUserQuota(user_id);
   }
 
+  @Post('cancel/:user_id')
+  async cancelRequest(
+    @Param('user_id', ParseIntPipe) user_id: number
+  ) {
+    return this.chatService.cancelRequest(user_id);
+  }
+
   @Post('send/:session_id')
   async sendMessage(
     @Param('session_id') session_id: number,

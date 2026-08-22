@@ -859,8 +859,8 @@ export class CATExamService {
             readiness_percentage: readinessPercentage,
             min_items_required: MIN_ITEMS_FOR_CAT,
             message: isReady
-                ? `✅ คลังข้อสอบพร้อมใช้กับ CAT (มีข้อสอบที่มี IRT parameters ครบ ${validItemsCount} ข้อ)`
-                : `❌ คลังข้อสอบยังไม่พร้อมใช้กับ CAT (มีข้อสอบที่มี IRT parameters ครบเพียง ${validItemsCount}/${MIN_ITEMS_FOR_CAT} ข้อ)`,
+                ? `คลังข้อสอบพร้อมใช้กับ CAT (มีข้อสอบที่มี IRT parameters ครบ ${validItemsCount} ข้อ)`
+                : `คลังข้อสอบยังไม่พร้อมใช้กับ CAT (มีข้อสอบที่มี IRT parameters ครบเพียง ${validItemsCount}/${MIN_ITEMS_FOR_CAT} ข้อ)`,
             items_without_irt: itemsWithoutIRT,
         };
     }

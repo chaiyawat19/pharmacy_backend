@@ -2043,10 +2043,13 @@ export class ItemsBankService {
       category_name: rel.category.category_name
     }));
 
-    // 6. Recent Activity (Latest 10 sessions)
+    // 6. Recent Activity (Latest 10 completed sessions)
     const recentActivityRaw = await this.examSessionRepo.find({
-      where: { itemBankId: itemBankId },
-      order: { start_time: 'DESC' },
+      where: {
+        itemBankId: itemBankId,
+        end_time: Not(IsNull()),
+      },
+      order: { end_time: 'DESC' },
       take: 10,
       relations: ['user']
     });
@@ -2058,25 +2061,20 @@ export class ItemsBankService {
         if (!session.user) return `User #${session.userId}`;
         const fName = (session.user.first_name || '').trim();
         const lName = (session.user.last_name || '').trim();
-        if (!fName && !lName) return `User #${session.userId}`;
-        const maskedFirst = fName.length <= 2
-          ? (fName.charAt(0) || '*') + '*'.repeat(Math.max(1, fName.length - 1))
-          : fName.substring(0, 2) + '*'.repeat(Math.max(1, fName.length - 2));
-        const maskedLast = lName.length > 0
-          ? lName.charAt(0) + '*'.repeat(Math.max(1, lName.length - 1))
-          : '';
-        return maskedLast ? `${maskedFirst} ${maskedLast}` : maskedFirst;
+        const fullName = [fName, lName].filter(Boolean).join(' ');
+        return fullName || `User #${session.userId}`;
       })(),
       start_time: session.start_time,
       end_time: session.end_time,
-      score: session.final_score,
-      status: session.end_time ? 'COMPLETED' : 'IN_PROGRESS'
+      score: session.final_score != null ? Math.round(Number(session.final_score) * 100) / 100 : null,
+      status: 'COMPLETED'
     }));
 
     return {
       item_bank: {
         id: bank.item_bank_id,
         name: bank.bank_name,
+        description: bank.description,
         created_at: bank.created_at, // ส่ง created_at กลับไปด้วย
         updated_at: bank.updated_at,
         duration: bank.duration,
