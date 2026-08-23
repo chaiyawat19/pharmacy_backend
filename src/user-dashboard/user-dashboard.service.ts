@@ -243,7 +243,7 @@ export class UserDashboardService {
       JOIN sub_topics      st  ON st.sub_topic_id = ist.sub_topic_id
       JOIN topics          t   ON t.topic_id      = st.topic_id
       GROUP BY t.topic_name, st.sub_topic_id, st.sub_topic_name
-      HAVING COUNT(resp.item_id) >= 3
+      HAVING COUNT(resp.item_id) >= 1
       `,
       [userId],
     );
