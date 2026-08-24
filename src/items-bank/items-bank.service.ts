@@ -25,6 +25,7 @@ import { User } from '../users/entities/user.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { NameUniquenessService } from '../common/name-uniqueness.service';
+import { ItemsBankImportService } from './items-bank-import.service';
 
 @Injectable()
 export class ItemsBankService {
@@ -54,6 +55,7 @@ export class ItemsBankService {
     @InjectRepository(Notification)
     private readonly notificationRepo: Repository<Notification>,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly itemsBankImportService: ItemsBankImportService,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly nameUniquenessService: NameUniquenessService,
@@ -105,6 +107,90 @@ export class ItemsBankService {
     }
 
     return savedBank;
+  }
+
+  /**
+   * สร้าง Item Bank พร้อมนำเข้าข้อสอบจากไฟล์ Excel ทันที
+   */
+  async createBankWithExcel(body: any, file: Express.Multer.File) {
+    let categoryIds: number[] = [];
+    if (body.category_ids) {
+      if (typeof body.category_ids === 'string') {
+        try {
+          categoryIds = JSON.parse(body.category_ids);
+        } catch {
+          categoryIds = [];
+        }
+      } else if (Array.isArray(body.category_ids)) {
+        categoryIds = body.category_ids;
+      }
+    }
+
+    const bankName = body.bank_name ? String(body.bank_name).trim() : '';
+    if (!bankName) {
+      throw new BadRequestException('กรุณากรอกชื่อชุดข้อสอบ');
+    }
+
+    // Check name uniqueness
+    const uniquenessCheck = await this.nameUniquenessService.checkNameUniqueness(
+      bankName,
+      'itembank'
+    );
+    if (uniquenessCheck.exists) {
+      throw new BadRequestException(`ชื่อ "${bankName}" ถูกใช้ไปแล้ว`);
+    }
+
+    const description = body.description ? String(body.description).trim() : '';
+    const duration = body.duration ? parseInt(body.duration, 10) : 3600;
+    const requestedActive = body.is_active === 'true' || body.is_active === true;
+
+    // สร้าง item bank แบบปิดใช้งานไว้ก่อนระหว่างรอ import ข้อสอบ
+    const bank = this.bankRepo.create({
+      bank_name: bankName,
+      description,
+      duration,
+      is_active: false,
+    });
+    const savedBank = await this.bankRepo.save(bank);
+
+    // บันทึก category relations
+    if (categoryIds && categoryIds.length > 0) {
+      const categoryRelations = categoryIds.map((categoryId) =>
+        this.itemBankCategoryRepo.create({
+          item_bank_id: savedBank.item_bank_id,
+          category_id: Number(categoryId),
+        })
+      );
+      await this.itemBankCategoryRepo.save(categoryRelations);
+    }
+
+    // นำเข้าข้อสอบจาก Excel
+    let importResult: any = { items_count: 0, situations_count: 0, errors: [] };
+    if (file) {
+      importResult = await this.itemsBankImportService.importExcelToBank(
+        savedBank.item_bank_id,
+        file
+      );
+    }
+
+    // ถ้าผู้ใช้เลือกเปิดใช้งาน และมีข้อสอบอย่างน้อย 1 ข้อ ให้เปิดใช้งาน
+    if (requestedActive && (importResult.items_count || 0) > 0) {
+      savedBank.is_active = true;
+      await this.bankRepo.save(savedBank);
+      this.notifyAllUsersNewExamBank(savedBank).catch((err) =>
+        console.error('Failed to send exam bank notifications:', err)
+      );
+    }
+
+    return {
+      message: 'สร้างชุดข้อสอบและนำเข้าข้อสอบเรียบร้อยแล้ว',
+      item_bank: savedBank,
+      import_result: {
+        imported_count: importResult.items_count || 0,
+        situations_count: importResult.situations_count || 0,
+        errors: importResult.errors || [],
+      },
+    };
   }
 
   /**

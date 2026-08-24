@@ -27,6 +27,39 @@ export class ItemsBankController {
     return this.itemsBankService.createBank(createItemsBankDto);
   }
 
+  @Post('with-excel')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      fileFilter: (req, file, cb) => {
+        const allowedMimeTypes = [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'application/octet-stream',
+        ];
+        const isExcel =
+          allowedMimeTypes.includes(file.mimetype) ||
+          file.originalname.match(/\.(xlsx|xls)$/i);
+        if (!isExcel) {
+          return cb(
+            new BadRequestException('รองรับเฉพาะไฟล์ Excel (.xlsx, .xls) เท่านั้น'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: {
+        fileSize: 50 * 1024 * 1024,
+        files: 1,
+      },
+    }),
+  )
+  createWithExcel(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
+  ) {
+    return this.itemsBankService.createBankWithExcel(body, file);
+  }
+
   /**
    * รายการชุดข้อสอบ — เปิดให้ guest เข้าดูได้ (เฉพาะ metadata ไม่มีเฉลย)
    */
