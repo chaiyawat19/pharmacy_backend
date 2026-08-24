@@ -8,6 +8,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ServerOptions } from 'socket.io';
 import helmet from 'helmet';
 import dns from 'dns';
+import fs from 'fs';
 import { DataSource } from 'typeorm';
 
 // บังคับให้ Node แก้ DNS เป็น IPv4 ก่อน (Pinecone/Gemini ใช้ IPv4 เป็นหลัก)
@@ -106,7 +107,12 @@ async function bootstrap() {
     }),
   );
 
-  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+  const baseUploadDir = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads');
+  if (!fs.existsSync(baseUploadDir)) {
+    fs.mkdirSync(baseUploadDir, { recursive: true });
+  }
+
+  app.useStaticAssets(baseUploadDir, {
     prefix: '/uploads/',
   });
 

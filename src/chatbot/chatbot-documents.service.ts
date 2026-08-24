@@ -158,17 +158,30 @@ export class ChatbotDocumentsService {
     }
 
     const contentType = getContentTypeByFileName(doc.file_name);
+    const fileName = doc.file_url
+      ? path.basename(doc.file_url)
+      : doc.file_path
+      ? path.basename(doc.file_path)
+      : '';
 
-    if (doc.file_path && fs.existsSync(doc.file_path)) {
-      const buffer = fs.readFileSync(doc.file_path);
-      return { buffer, fileName: doc.file_name, contentType };
-    }
+    const candidatePaths = [
+      doc.file_path,
+      doc.file_url ? path.join(process.cwd(), doc.file_url.replace(/^\//, '')) : null,
+      fileName ? path.join(process.cwd(), 'uploads', 'chatbot_docs', fileName) : null,
+      fileName ? path.join('/app', 'uploads', 'chatbot_docs', fileName) : null,
+      fileName ? path.join('/app', 'pharmacy_backend', 'uploads', 'chatbot_docs', fileName) : null,
+      fileName && process.env.UPLOAD_DIR ? path.join(process.env.UPLOAD_DIR, 'chatbot_docs', fileName) : null,
+      fileName && process.env.UPLOAD_DIR ? path.join(process.env.UPLOAD_DIR, fileName) : null,
+    ].filter(Boolean) as string[];
 
-    if (doc.file_url) {
-      const fallbackPath = path.join(process.cwd(), doc.file_url.replace(/^\//, ''));
-      if (fs.existsSync(fallbackPath)) {
-        const buffer = fs.readFileSync(fallbackPath);
-        return { buffer, fileName: doc.file_name, contentType };
+    for (const candidatePath of candidatePaths) {
+      try {
+        if (fs.existsSync(candidatePath)) {
+          const buffer = fs.readFileSync(candidatePath);
+          return { buffer, fileName: doc.file_name, contentType };
+        }
+      } catch (err) {
+        // continue checking other candidate paths
       }
     }
 
@@ -185,7 +198,8 @@ export class ChatbotDocumentsService {
     }
 
     // บันทึกไฟล์ลง Disk เพื่อเปิดอ่านและดาวน์โหลด
-    const uploadDir = path.join(process.cwd(), 'uploads', 'chatbot_docs');
+    const baseUploadDir = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
+    const uploadDir = path.join(baseUploadDir, 'chatbot_docs');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
