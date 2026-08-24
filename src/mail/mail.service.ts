@@ -16,6 +16,30 @@ export class MailService {
         });
     }
 
+    private async sendViaBrevo(to: string, subject: string, html: string) {
+        const apiKey = process.env.BREVO_API_KEY;
+        const senderEmail = process.env.MAIL_USER || 'suthinantong123@gmail.com';
+        const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'api-key': apiKey!,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sender: { name: 'เภสัชพร้อมสอบ', email: senderEmail },
+                to: [{ email: to }],
+                subject,
+                htmlContent: html,
+            }),
+        });
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData?.message || `Brevo API Error: ${res.statusText}`);
+        }
+        return await res.json();
+    }
+
     private async sendViaResend(to: string, subject: string, html: string) {
         const apiKey = process.env.RESEND_API_KEY;
         const res = await fetch('https://api.resend.com/emails', {
@@ -52,7 +76,9 @@ export class MailService {
         `;
 
         try {
-            if (process.env.RESEND_API_KEY) {
+            if (process.env.BREVO_API_KEY) {
+                await this.sendViaBrevo(email, subject, html);
+            } else if (process.env.RESEND_API_KEY) {
                 await this.sendViaResend(email, subject, html);
             } else {
                 const transporter = this.getTransporter();
@@ -84,7 +110,9 @@ export class MailService {
         `;
 
         try {
-            if (process.env.RESEND_API_KEY) {
+            if (process.env.BREVO_API_KEY) {
+                await this.sendViaBrevo(email, subject, html);
+            } else if (process.env.RESEND_API_KEY) {
                 await this.sendViaResend(email, subject, html);
             } else {
                 const transporter = this.getTransporter();
