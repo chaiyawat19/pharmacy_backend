@@ -17,6 +17,10 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { SendOtpDto } from './dto/send-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -43,14 +47,17 @@ export class AuthController {
   @Throttle({ auth: {} })
   @Public()
   @Post('forgot-password')
-  async forgotPassword(@Body('email') email: string) {
-    return this.authService.forgotPassword(email);
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(forgotPasswordDto.email);
   }
 
   @Public()
   @Post('reset-password')
-  async resetPassword(@Body() body: { token: string; newPassword: string }) {
-    return this.authService.resetPassword(body.token, body.newPassword);
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.authService.resetPassword(
+      resetPasswordDto.token,
+      resetPasswordDto.newPassword,
+    );
   }
 
   @UseGuards(JwtAuthGuard)
@@ -66,12 +73,8 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   async logout(@Request() req, @Res({ passthrough: true }) res) {
-    // Clear any server-side session data if needed
-    // For JWT-based auth, the token invalidation happens on client-side
-    // But we can log the logout event or clear any refresh tokens here
-
     return {
-      message: 'Logout successful'
+      message: 'Logout successful',
     };
   }
 
@@ -89,7 +92,6 @@ export class AuthController {
     }
     const accessToken = await this.authService.socialLogin(req.user);
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    // ส่ง token กลับ Frontend ผ่าน URL parameter
     return res.redirect(`${frontendUrl}/auth/callback?token=${accessToken}`);
   }
 
@@ -105,14 +107,13 @@ export class AuthController {
   @Throttle({ auth: {} })
   @Public()
   @Post('send-otp')
-  async sendOTP(@Body('email') email: string) {
-    const cleanEmail = email?.trim().toLowerCase();
-    if (!cleanEmail) {
-      throw new BadRequestException('กรุณาระบุอีเมล');
-    }
+  async sendOTP(@Body() sendOtpDto: SendOtpDto) {
+    const cleanEmail = sendOtpDto.email?.trim().toLowerCase();
     const exists = await this.usersService.findByEmail(cleanEmail);
     if (exists) {
-      throw new BadRequestException('อีเมลนี้ถูกใช้งานในระบบแล้ว กรุณาใช้อีเมลอื่น หรือเข้าสู่ระบบ');
+      throw new BadRequestException(
+        'อีเมลนี้ถูกใช้งานในระบบแล้ว กรุณาใช้อีเมลอื่น หรือเข้าสู่ระบบ',
+      );
     }
     return this.authService.sendOTP(cleanEmail);
   }
@@ -120,8 +121,11 @@ export class AuthController {
   /** ตรวจสอบ OTP */
   @Public()
   @Post('verify-otp')
-  async verifyOTP(@Body() body: { email: string; otp: string }) {
-    const isValid = await this.authService.verifyOTP(body.email, body.otp);
+  async verifyOTP(@Body() verifyOtpDto: VerifyOtpDto) {
+    const isValid = await this.authService.verifyOTP(
+      verifyOtpDto.email,
+      verifyOtpDto.otp,
+    );
     if (!isValid) {
       throw new BadRequestException('รหัส OTP ไม่ถูกต้องหรือหมดอายุ');
     }
