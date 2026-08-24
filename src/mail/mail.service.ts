@@ -3,27 +3,45 @@ import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
-    private transporter;
-
-    constructor() {
-        this.transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com', // ใช้ host แทน service จะเสถียรกว่าในบางกรณี
-            port: 587,
-            secure: false, // true สำหรับ 465, false สำหรับพอร์ตอื่นๆ
+    private getTransporter() {
+        return nodemailer.createTransport({
+            service: 'gmail',
             auth: {
                 user: process.env.MAIL_USER,
-                pass: process.env.MAIL_PASS,
+                pass: process.env.MAIL_PASS?.replace(/\s+/g, ''),
             },
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 15000,
         });
     }
 
+    private async sendViaResend(to: string, subject: string, html: string) {
+        const apiKey = process.env.RESEND_API_KEY;
+        const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                from: 'เภสัชพร้อมสอบ <onboarding@resend.dev>',
+                to: [to],
+                subject,
+                html,
+            }),
+        });
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData?.message || `Resend API Error: ${res.statusText}`);
+        }
+        return await res.json();
+    }
+
     async sendResetPassword(email: string, link: string) {
-        try {
-            await this.transporter.sendMail({
-                from: `"เภสัชพร้อมสอบ" <${process.env.MAIL_USER}>`, // ใส่ชื่อผู้ส่ง
-                to: email,
-                subject: 'ตั้งรหัสผ่านใหม่ - เภสัชพร้อมสอบ',
-                html: `
+        const subject = 'ตั้งรหัสผ่านใหม่ - เภสัชพร้อมสอบ';
+        const html = `
           <div style="font-family: sans-serif; padding: 20px;">
             <h2>สวัสดีครับ,</h2>
             <p>คุณได้ทำการขอเปลี่ยนรหัสผ่านใหม่</p>
@@ -31,21 +49,29 @@ export class MailService {
             <a href="${link}" style="background-color: #10b981; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">ตั้งรหัสผ่านใหม่</a>
             <p>หากคุณไม่ได้เป็นผู้ร้องขอ กรุณาละทิ้งอีเมลฉบับนี้</p>
           </div>
-        `,
-            });
+        `;
+
+        try {
+            if (process.env.RESEND_API_KEY) {
+                await this.sendViaResend(email, subject, html);
+            } else {
+                const transporter = this.getTransporter();
+                await transporter.sendMail({
+                    from: `"เภสัชพร้อมสอบ" <${process.env.MAIL_USER}>`,
+                    to: email,
+                    subject,
+                    html,
+                });
+            }
         } catch (error) {
             console.error('Mail Sending Error:', error);
-            throw new InternalServerErrorException('ไม่สามารถส่งอีเมลได้ในขณะนี้');
+            throw new InternalServerErrorException('ไม่สามารถส่งอีเมลได้ในขณะนี้: ' + (error?.message || ''));
         }
     }
 
     async sendOTP(email: string, otp: string) {
-        try {
-            await this.transporter.sendMail({
-                from: `"เภสัชพร้อมสอบ" <${process.env.MAIL_USER}>`,
-                to: email,
-                subject: 'รหัส OTP สำหรับสมัครสมาชิก - เภสัชพร้อมสอบ',
-                html: `
+        const subject = 'รหัส OTP สำหรับสมัครสมาชิก - เภสัชพร้อมสอบ';
+        const html = `
           <div style="font-family: sans-serif; padding: 20px;">
             <h2>สวัสดีครับ,</h2>
             <p>รหัส OTP สำหรับยืนยันการสมัครสมาชิก:</p>
@@ -55,11 +81,23 @@ export class MailService {
             <p style="color: #ef4444;">⚠️ รหัสนี้จะหมดอายุใน 5 นาที</p>
             <p>หากคุณไม่ได้เป็นผู้ร้องขอ กรุณาละทิ้งอีเมลฉบับนี้</p>
           </div>
-        `,
-            });
+        `;
+
+        try {
+            if (process.env.RESEND_API_KEY) {
+                await this.sendViaResend(email, subject, html);
+            } else {
+                const transporter = this.getTransporter();
+                await transporter.sendMail({
+                    from: `"เภสัชพร้อมสอบ" <${process.env.MAIL_USER}>`,
+                    to: email,
+                    subject,
+                    html,
+                });
+            }
         } catch (error) {
             console.error('OTP Mail Sending Error:', error);
-            throw new InternalServerErrorException('ไม่สามารถส่ง OTP ได้ในขณะนี้');
+            throw new InternalServerErrorException('ไม่สามารถส่ง OTP ได้ในขณะนี้: ' + (error?.message || ''));
         }
     }
 }
