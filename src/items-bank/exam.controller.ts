@@ -24,6 +24,16 @@ export class ExamController {
     }
 
     /**
+     * Get active in-progress exam session for user
+     * GET /items-bank/exam/active-session
+     */
+    @Get('exam/active-session')
+    getActiveExamSession(@Req() req, @Query('item_bank_id') itemBankId?: string) {
+        const userId = req.user.userId;
+        return this.examService.getActiveSession(userId, itemBankId ? +itemBankId : undefined);
+    }
+
+    /**
      * Submit exam answers
      * POST /items-bank/exam/:sessionId/submit
      */

@@ -37,6 +37,15 @@ export class CATController {
     }
 
     /**
+     * ตรวจสอบเซสชัน CAT ที่กำลังทำค้างอยู่
+     */
+    @Get('active-session')
+    async getActiveSession(@Request() req) {
+        const userId = req.user.userId;
+        return this.catExamService.getActiveCATSession(userId);
+    }
+
+    /**
      * รับข้อสอบข้อถัดไป
      */
     @Get('session/:session_id/next-item')

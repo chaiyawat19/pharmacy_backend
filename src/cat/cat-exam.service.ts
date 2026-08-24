@@ -45,6 +45,27 @@ export class CATExamService {
         const { min_items, max_items, target_se, cut_score, initial_theta, topic_proportions } =
             startExamDto;
 
+        // ตรวจสอบว่ามี session CAT เดิมที่ยังทำค้างอยู่หรือไม่
+        const existingCAT = await this.catSessionRepo.findOne({
+            where: {
+                userId,
+                end_time: null as any,
+            },
+            order: { start_time: 'DESC' },
+        });
+
+        if (existingCAT) {
+            return {
+                message: 'พบเซสชันการสอบ CAT ที่ยังทำไม่เสร็จ',
+                session_id: existingCAT.session_id,
+                current_theta: existingCAT.current_theta,
+                current_se: existingCAT.current_se,
+                num_items: existingCAT.num_items,
+                start_time: existingCAT.start_time,
+                is_existing: true,
+            };
+        }
+
         // ดึงค่า theta จาก session ก่อนหน้าของ user เพื่อใช้เป็น Bayesian prior
         // (ถ้า user ระบุ initial_theta มาด้วยตัวเองก็ใช้ตามนั้น)
         let priorTheta = initial_theta ?? null;
@@ -1095,5 +1116,29 @@ export class CATExamService {
                 message: 'IRT calibration service could not be reached. Is irt_service running?',
             };
         }
+    }
+
+    /**
+     * ดึง active CAT session ของ user ที่ยังทำไม่เสร็จ
+     */
+    async getActiveCATSession(userId: number) {
+        const catSession = await this.catSessionRepo
+            .createQueryBuilder('cat')
+            .innerJoin('exam_sessions', 'base', 'base.session_id = cat.session_id')
+            .where('cat.userId = :userId', { userId })
+            .andWhere('cat.end_time IS NULL')
+            .andWhere('base.end_time IS NULL')
+            .orderBy('cat.start_time', 'DESC')
+            .getOne();
+
+        if (!catSession) return null;
+
+        return {
+            session_id: catSession.session_id,
+            num_items: catSession.num_items,
+            current_theta: catSession.current_theta,
+            current_se: catSession.current_se,
+            start_time: catSession.start_time,
+        };
     }
 }

@@ -48,6 +48,27 @@ export class ExamService {
       throw new NotFoundException(`ไม่พบคลังข้อสอบ ID ${item_bank_id}`);
     }
 
+    // ตรวจสอบว่ามี session เดิมของคลังนี้ที่ยังทำค้างอยู่หรือไม่
+    const existingSession = await this.examSessionRepo.findOne({
+      where: {
+        userId,
+        itemBankId: item_bank_id,
+        session_type: 'NORMAL',
+        end_time: null as any,
+      },
+      order: { start_time: 'DESC' },
+    });
+
+    if (existingSession) {
+      return {
+        message: 'พบการสอบเดิมที่ยังทำไม่เสร็จ',
+        session_id: Number(existingSession.session_id),
+        item_bank_id: existingSession.itemBankId,
+        start_time: existingSession.start_time,
+        is_existing: true,
+      };
+    }
+
     const session = this.examSessionRepo.create({
       userId: userId,
       itemBankId: item_bank_id,
@@ -61,6 +82,32 @@ export class ExamService {
       session_id: Number(savedSession.session_id),
       item_bank_id: savedSession.itemBankId,
       start_time: savedSession.start_time,
+      is_existing: false,
+    };
+  }
+
+  async getActiveSession(userId: number, itemBankId?: number) {
+    const query = this.examSessionRepo
+      .createQueryBuilder('session')
+      .leftJoinAndSelect('session.item_bank', 'bank')
+      .where('session.userId = :userId', { userId })
+      .andWhere('session.session_type = :type', { type: 'NORMAL' })
+      .andWhere('session.end_time IS NULL')
+      .orderBy('session.start_time', 'DESC');
+
+    if (itemBankId) {
+      query.andWhere('session.itemBankId = :itemBankId', { itemBankId });
+    }
+
+    const session = await query.getOne();
+    if (!session) return null;
+
+    return {
+      session_id: Number(session.session_id),
+      item_bank_id: session.itemBankId,
+      bank_name: session.item_bank?.bank_name || '',
+      start_time: session.start_time,
+      duration: session.item_bank?.duration || 3600,
     };
   }
 
