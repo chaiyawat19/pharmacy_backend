@@ -70,7 +70,28 @@ export class UsersService {
     const user = this.userRepository.create({
       ...createUserDto,
       password: hashedPassword,
-      role_id: 1,
+      role_id: 1, // Role 1 = User
+    });
+    return await this.userRepository.save(user);
+  }
+
+  async createAdmin(createUserDto: CreateUserDto) {
+    const cleanEmail = createUserDto.email.trim().toLowerCase();
+    const existingUser = await this.userRepository.findOne({
+      where: { email: cleanEmail },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('อีเมลนี้ถูกใช้งานในระบบแล้ว กรุณาใช้อีเมลอื่น');
+    }
+
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    const user = this.userRepository.create({
+      ...createUserDto,
+      email: cleanEmail,
+      tel: createUserDto.tel?.replace(/[-\s]/g, '') || null,
+      password: hashedPassword,
+      role_id: 2, // Role 2 = Admin
     });
     return await this.userRepository.save(user);
   }

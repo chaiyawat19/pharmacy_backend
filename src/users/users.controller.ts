@@ -52,6 +52,16 @@ export class UsersController {
   findAll() {
     return this.usersService.findAll();
   }
+
+  @Roles(2)
+  @Post('/admin')
+  async createAdmin(@Body() createUserDto: CreateUserDto) {
+    const user = await this.usersService.createAdmin(createUserDto);
+    return {
+      message: 'สร้างบัญชีผู้ดูแลระบบสำเร็จเรียบร้อย',
+      data: user,
+    };
+  }
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   getProfile(@Request() req) {
