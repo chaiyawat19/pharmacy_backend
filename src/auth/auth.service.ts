@@ -94,6 +94,8 @@ export class AuthService {
     const token = crypto.randomBytes(32).toString('hex');
     user.reset_password_token = token;
     user.reset_password_expires = new Date(Date.now() + 15 * 60 * 1000);
+    await this.userService.save(user);
+
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     const resetLink = `${frontendUrl}/reset-password?token=${token}`;
 
