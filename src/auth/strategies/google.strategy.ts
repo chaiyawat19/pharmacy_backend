@@ -33,10 +33,27 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       throw new Error('Google account has no email');
     }
 
+    let firstName = profile.name?.givenName?.trim() || '';
+    let lastName = profile.name?.familyName?.trim() || '';
+
+    // If givenName is missing, attempt to parse displayName
+    if (!firstName && profile.displayName) {
+      const parts = profile.displayName.trim().split(/\s+/);
+      firstName = parts[0] || '';
+      if (parts.length > 1 && !lastName) {
+        lastName = parts.slice(1).join(' ');
+      }
+    }
+
+    // If firstName is still missing, fallback to email prefix
+    if (!firstName && profile.emails?.[0]?.value) {
+      firstName = profile.emails[0].value.split('@')[0];
+    }
+
     return {
-      email: profile.emails[0].value,
-      first_name: profile.name?.givenName,
-      last_name: profile.name?.familyName,
+      email: profile.emails[0].value.toLowerCase(),
+      first_name: firstName,
+      last_name: lastName || '',
       profile_picture: profile.photos?.[0]?.value || null,
       provider: 'google',
     };

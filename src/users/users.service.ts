@@ -105,15 +105,15 @@ export class UsersService {
   }
   async createSocialUser(data: {
     email: string;
-    first_name: string;
-    last_name: string;
+    first_name?: string;
+    last_name?: string;
     provider: 'google';
-    profile_picture?: string;
+    profile_picture?: string | null;
   }): Promise<User> {
     const user = this.userRepository.create({
-      email: data.email,
-      first_name: data.first_name,
-      last_name: data.last_name,
+      email: data.email.trim().toLowerCase(),
+      first_name: data.first_name?.trim() || data.email.split('@')[0],
+      last_name: data.last_name?.trim() || '',
       provider: data.provider,
       profile_picture: data.profile_picture || null,
       role_id: 1,

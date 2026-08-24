@@ -55,6 +55,7 @@ describe('AuthService', () => {
             findOneByResetToken: jest.fn(),
             save: jest.fn(),
             createSocialUser: jest.fn(),
+            updateLastLogin: jest.fn(),
           },
         },
         {
@@ -145,17 +146,17 @@ describe('AuthService', () => {
   // login
   // ============================================================
   describe('login()', () => {
-    it('ควร return accessToken และ role_id', () => {
+    it('ควร return accessToken และ role_id', async () => {
       const user = { id: 1, email: 'x@x.com', role_id: 1, first_name: 'A', last_name: 'B' };
-      const result = service.login(user);
+      const result = await service.login(user);
 
       expect(result).toHaveProperty('accessToken', 'mock.jwt.token');
       expect(result).toHaveProperty('role_id', 1);
     });
 
-    it('ควร call jwtService.sign ด้วย payload ที่ถูกต้อง', () => {
+    it('ควร call jwtService.sign ด้วย payload ที่ถูกต้อง', async () => {
       const user = { id: 42, email: 'admin@x.com', role_id: 2, first_name: 'Admin', last_name: 'User' };
-      service.login(user);
+      await service.login(user);
 
       expect(jwtService.sign).toHaveBeenCalledWith(
         expect.objectContaining({
