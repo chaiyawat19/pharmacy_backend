@@ -106,7 +106,15 @@ export class AuthController {
   @Public()
   @Post('send-otp')
   async sendOTP(@Body('email') email: string) {
-    return this.authService.sendOTP(email);
+    const cleanEmail = email?.trim().toLowerCase();
+    if (!cleanEmail) {
+      throw new BadRequestException('กรุณาระบุอีเมล');
+    }
+    const exists = await this.usersService.findByEmail(cleanEmail);
+    if (exists) {
+      throw new BadRequestException('อีเมลนี้ถูกใช้งานในระบบแล้ว กรุณาใช้อีเมลอื่น หรือเข้าสู่ระบบ');
+    }
+    return this.authService.sendOTP(cleanEmail);
   }
 
   /** ตรวจสอบ OTP */

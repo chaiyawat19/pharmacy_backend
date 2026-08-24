@@ -33,15 +33,16 @@ export class UsersController {
   async register(@Body() body: CreateUserDto & { otp: string }) {
     const { otp, ...createUserDto } = body;
 
-    // ตรวจสอบ OTP ก่อนสร้าง user
-    const isValid = await this.authService.verifyOTP(createUserDto.email, otp);
-    if (!isValid) {
-      throw new BadRequestException('รหัส OTP ไม่ถูกต้องหรือหมดอายุ');
+    if (!otp) {
+      throw new BadRequestException('กรุณาระบุรหัส OTP');
     }
+
+    // ตรวจสอบ OTP ก่อนสร้าง user (จะ throw ข้อความเฉพาะเจาะจงถ้าหมดอายุหรือไม่ถูกต้อง)
+    await this.authService.verifyOTP(createUserDto.email, otp);
 
     await this.usersService.register(createUserDto);
     return {
-      message: 'User registered successfully',
+      message: 'สมัครสมาชิกสำเร็จเรียบร้อย',
       status: 201,
     };
   }

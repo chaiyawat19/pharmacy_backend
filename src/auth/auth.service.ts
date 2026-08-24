@@ -41,7 +41,10 @@ export class AuthService {
       role_id: user.role_id,
     };
   }
-  login(user: any) {
+  async login(user: any) {
+    if (user.id) {
+      await this.userService.updateLastLogin(user.id);
+    }
     const payload = {
       sub: user.id,
       email: user.email,
@@ -66,9 +69,13 @@ export class AuthService {
         provider: 'google',
         profile_picture: profile.profile_picture,
       });
-    } else if (profile.profile_picture && user.profile_picture !== profile.profile_picture) {
-      // อัปเดตรูปโปรไฟล์ถ้ามีการเปลี่ยนแปลงจาก Google
-      user.profile_picture = profile.profile_picture;
+      user.last_login_at = new Date();
+      await this.userService.save(user);
+    } else {
+      user.last_login_at = new Date();
+      if (profile.profile_picture && user.profile_picture !== profile.profile_picture) {
+        user.profile_picture = profile.profile_picture;
+      }
       await this.userService.save(user);
     }
 
@@ -102,23 +109,23 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string) {
-    const user = await this.userService.findOneByResetToken(token);
+    const cleanToken = token?.trim();
+    const user = await this.userService.findOneByResetToken(cleanToken);
 
     if (!user) {
-      throw new BadRequestException('Invalid Token: Not found in database');
+      throw new BadRequestException('ลิงก์นี้ไม่ถูกต้องหรือถูกแทนที่ด้วยลิงก์ใหม่แล้ว กรุณากดขอลิงก์ใหม่อีกครั้ง');
     }
     const now = new Date();
-    if (!user.reset_password_expires || user.reset_password_expires < now) {
-      throw new BadRequestException(
-        `Link Expired. DB: ${user.reset_password_expires} vs Now: ${now}`,
-      );
+    if (!user.reset_password_expires || new Date(user.reset_password_expires) < now) {
+      throw new BadRequestException('ลิงก์นี้หมดอายุแล้ว (มีอายุ 15 นาที) กรุณากดขอลิงก์ใหม่อีกครั้ง');
     }
     try {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       user.password = hashedPassword;
       user.reset_password_token = null;
       user.reset_password_expires = null;
-      return await this.userService.save(user);
+      await this.userService.save(user);
+      return { message: 'เปลี่ยนรหัสผ่านสำเร็จ' };
     } catch (error) {
       throw new BadRequestException(
         'Error while saving new password: ' + error.message,
@@ -144,16 +151,20 @@ export class AuthService {
       expires_at: LessThan(new Date()),
     });
 
-    // ตรวจสอบว่ามี OTP ที่ยังไม่หมดอายุหรือไม่
+    // ตรวจสอบว่ามี OTP ที่ยังไม่หมดอายุหรือไม่ (cooldown 1 นาที)
     const existingOTP = await this.otpRepo.findOne({
       where: { email },
       order: { created_at: 'DESC' },
     });
 
     if (existingOTP && existingOTP.expires_at > new Date()) {
-      throw new BadRequestException(
-        'กรุณารอ 5 นาทีก่อนขอ OTP ใหม่',
-      );
+      const remainingSeconds = Math.ceil((existingOTP.expires_at.getTime() - Date.now()) / 1000);
+      // ถ้าเพิ่งขอไปไม่ถึง 1 นาที
+      if (remainingSeconds > 4 * 60) {
+        throw new BadRequestException(
+          'กรุณารอ 1 นาทีก่อนขอรหัส OTP ใหม่อีกครั้ง',
+        );
+      }
     }
 
     // สุ่ม OTP 6 หลัก
@@ -170,7 +181,7 @@ export class AuthService {
     // ส่งอีเมล
     try {
       await this.mailService.sendOTP(email, otp);
-      return { message: 'ส่ง OTP ไปยังอีเมลแล้ว' };
+      return { message: 'ส่งรหัส OTP ไปยังอีเมลของคุณเรียบร้อยแล้ว' };
     } catch (err) {
       await this.otpRepo.delete({ email });
       throw err;
@@ -178,25 +189,33 @@ export class AuthService {
   }
 
   /**
-   * ตรวจสอบ OTP
+   * ตรวจสอบ OTP แบบละเอียด
    */
   async verifyOTP(email: string, otp: string): Promise<boolean> {
-    const otpEntity = await this.otpRepo.findOne({
-      where: { email, otp },
+    const cleanOtp = otp?.trim();
+    const cleanEmail = email?.trim().toLowerCase();
+
+    // ค้นหา OTP ล่าสุดของ email นี้
+    const latestOtp = await this.otpRepo.findOne({
+      where: { email: cleanEmail },
       order: { created_at: 'DESC' },
     });
 
-    if (!otpEntity) {
-      return false;
+    if (!latestOtp) {
+      throw new BadRequestException('ไม่พบข้อมูลรหัส OTP กรุณากดขอรหัส OTP ใหม่อีกครั้ง');
     }
 
-    if (otpEntity.expires_at < new Date()) {
-      await this.otpRepo.delete({ id: otpEntity.id });
-      return false;
+    if (latestOtp.expires_at < new Date()) {
+      await this.otpRepo.delete({ id: latestOtp.id });
+      throw new BadRequestException('รหัส OTP หมดอายุแล้ว (อายุใช้งาน 5 นาที) กรุณากดขอรหัสใหม่อีกครั้ง');
+    }
+
+    if (latestOtp.otp !== cleanOtp) {
+      throw new BadRequestException('รหัส OTP ไม่ถูกต้อง กรุณาตรวจสอบรหัส 6 หลักในอีเมลอีกครั้ง');
     }
 
     // ลบ OTP หลังใช้งาน
-    await this.otpRepo.delete({ id: otpEntity.id });
+    await this.otpRepo.delete({ id: latestOtp.id });
     return true;
   }
 }

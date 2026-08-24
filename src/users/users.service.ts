@@ -26,16 +26,25 @@ export class UsersService {
     });
   }
   async findOneByResetToken(token: string): Promise<User | null> {
+    if (!token) return null;
     return await this.userRepository.findOne({
       where: {
-        reset_password_token: token,
-        reset_password_expires: MoreThan(new Date()),
+        reset_password_token: token.trim(),
       },
     });
   }
+  async updateLastLogin(user_id: number): Promise<void> {
+    try {
+      await this.userRepository.update({ user_id }, { last_login_at: new Date() });
+    } catch (e) {
+      console.warn('Failed to update last_login_at:', e);
+    }
+  }
+
   async findAll() {
     const users = await this.userRepository.find({
       relations: { university: true, role: true },
+      order: { created_at: 'DESC' },
     });
     return users;
   }
@@ -54,7 +63,7 @@ export class UsersService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Email already exists');
+      throw new ConflictException('อีเมลนี้ถูกใช้งานในระบบแล้ว กรุณาใช้อีเมลอื่น หรือเข้าสู่ระบบ');
     }
 
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);

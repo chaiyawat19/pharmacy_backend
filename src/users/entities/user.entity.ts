@@ -70,6 +70,9 @@ export class User {
   @Column({ type: 'timestamp', nullable: true })
   reset_password_expires: Date | null;
 
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  last_login_at: Date | null;
+
   @OneToMany(() => Note, (note) => note.user)
   notes: Note[];
 
