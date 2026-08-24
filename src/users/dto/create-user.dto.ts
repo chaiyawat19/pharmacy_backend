@@ -42,9 +42,9 @@ export class CreateUserDto {
   @Type(() => Date)
   bod: Date;
 
-  @IsNotEmpty({ message: 'กรุณาเลือกมหาวิทยาลัย' })
+  @IsOptional()
   @IsInt()
-  university_id: number;
+  university_id?: number | null;
 
   @IsOptional()
   @IsString()

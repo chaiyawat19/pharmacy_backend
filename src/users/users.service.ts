@@ -90,6 +90,7 @@ export class UsersService {
       ...createUserDto,
       email: cleanEmail,
       tel: createUserDto.tel?.replace(/[-\s]/g, '') || null,
+      university_id: createUserDto.university_id ? Number(createUserDto.university_id) : null,
       password: hashedPassword,
       role_id: 2, // Role 2 = Admin
     });
