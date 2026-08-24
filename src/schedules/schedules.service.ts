@@ -38,23 +38,57 @@ export class SchedulesService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const model = this.genAI.getGenerativeModel({
-          model: 'gemini-3.1-flash-lite',
+          model: 'gemini-2.5-flash',
         });
 
-        const prompt = `ดึงข้อมูลกำหนดการจาก PDF นี้และตอบกลับเป็น JSON Array เท่านั้น
-        ห้ามอธิบายเพิ่มเติม ห้ามใส่ Markdown
+        const prompt = `คุณคือผู้เชี่ยวชาญการสกัดข้อมูลตารางกำหนดการสอบสภาเภสัชกรรมจากเอกสาร PDF
+ให้ดึงข้อมูลกำหนดการทุกแถวในทุกตาราง และตอบกลับเป็น JSON Array เท่านั้น ห้ามใส่คำอธิบายเพิ่มเติม ห้ามใส่ Markdown
 
-        **กฎสำคัญสำหรับ title:**
-        - title ต้องไม่เป็นค่าว่าง ห้ามเว้นว่าง
-        - ถ้ามีหัวข้อหลักด้านบนของตาราง (เช่น "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 4/2569 [การสอบสมรรถนะร่วม]") ให้นำมาใส่ใน title ของทุกรายการที่อยู่ภายใต้หัวข้อนั้น
-        - ถ้าแต่ละรายการมีชื่อกิจกรรมเฉพาะ ให้รวมกับหัวข้อหลัก เช่น "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 4/2569 - วันสอบ PLE-IP1"
-        - ถ้าไม่มีข้อมูลชื่อเลย ให้ใช้ description หรือวันที่มาตั้งชื่อแทน
+กฎสำคัญในการสกัดข้อมูล:
 
-        เงื่อนไขสำคัญสำหรับ type_event:
-        - ถ้าเนื้อหาเกี่ยวข้องกับ PLE-IP1 หรือ PC1 หรือ PHCP1 ให้บันทึกค่าใน Array เป็น "PLE-IP1, PC1, PHCP1" (ก้อนเดียว)
-        - หลักสูตรอื่นๆ ให้ระบุแยกตามปกติ
+1. **การตั้งชื่อ title (สำคัญมาก):**
+   - ด้านบนของแต่ละหน้าหรือตารางจะมีหัวข้อหลัก เช่น:
+     "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 5/2569 [การสอบสมรรถนะเฉพาะสาขา]"
+     หรือ "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 6/2569 [การสอบสมรรถนะร่วม]"
+   - ให้ดึงหัวข้อหลักด้านบนรวมถึงข้อความในวงเล็บก้ามปู [...] มาใส่ใน title ของทุกรายการ แล้วต่อด้วย " - " และชื่อกิจกรรมหลักจากคอลัมน์ "การดำเนินการ"
+   - ตัวอย่าง title ที่ถูกต้อง:
+     - "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 5/2569 [การสอบสมรรถนะเฉพาะสาขา] - รับสมัครสอบบนเว็บไซต์ศูนย์สอบฯ"
+     - "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 5/2569 [การสอบสมรรถนะเฉพาะสาขา] - วันที่สอบ PLE-IP1 , PLE-PC1 , PLE-PHCP1"
+     - "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 6/2569 [การสอบสมรรถนะร่วม] - วันที่สอบ PLE-CC2"
+     - "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 6/2569 [การสอบสมรรถนะร่วม] - วันที่สอบ PLE-CC1"
 
-        โครงสร้าง JSON: [{ "title": "...", "description": "...", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "type_event": ["PLE-IP1, PC1, PHCP1"] }]`;
+2. **ประเภทการสอบ type_event (ตรวจสอบเครื่องหมายถูก ✓ ในคอลัมน์ทางขวาของแต่ละแถว):**
+   - คอลัมน์ที่อาจมีในตาราง:
+     * คอลัมน์ "PLE-IP1, PC1,PHCP1" หรือ "PLE-IP1, PC1, PHCP1" -> ใส่ค่า "PLE-IP1, PC1, PHCP1"
+     * คอลัมน์ "PLE-IP2" -> ใส่ค่า "PLE-IP2"
+     * คอลัมน์ "PLE-PC2" -> ใส่ค่า "PLE-PC2"
+     * คอลัมน์ "PLE-PHCP2" -> ใส่ค่า "PLE-PHCP2"
+     * คอลัมน์ "PLE-CC1" -> ใส่ค่า "PLE-CC1"
+     * คอลัมน์ "PLE-CC2" -> ใส่ค่า "PLE-CC2"
+   - แถวใดมีเครื่องหมาย ✓ ในคอลัมน์ใด ให้นำชื่อคอลัมน์นั้นมาใส่ใน Array type_event
+   - ตัวอย่าง: ถ้ามีเครื่องหมาย ✓ ที่ PLE-CC1 และ PLE-CC2 ให้ type_event เป็น ["PLE-CC1", "PLE-CC2"]
+
+3. **วันที่ startDate และ endDate:**
+   - แปลงปี พ.ศ. เป็น ค.ศ. (พ.ศ. - 543) เช่น 2569 -> 2026, 2570 -> 2027
+   - แปลงเดือนภาษาไทยเป็นตัวเลข (ม.ค.=01, ก.ย.=09, ต.ค.=10, ธ.ค.=12 เป็นต้น)
+   - คืนค่าในรูปแบบ "YYYY-MM-DD"
+   - ถ้าเป็นวันเดียว เช่น "11 ธันวาคม 2569" -> startDate: "2026-12-11", endDate: "2026-12-11"
+   - ถ้าเป็นช่วงวัน เช่น "1 - 14 กันยายน 2569" -> startDate: "2026-09-01", endDate: "2026-09-14"
+   - ถ้าข้ามปี เช่น "4 - 18 มกราคม 2570" -> startDate: "2027-01-04", endDate: "2027-01-18"
+
+4. **คำอธิบาย description:**
+   - นำข้อความรายละเอียดทั้งหมดในคอลัมน์ "การดำเนินการ" ของแถวนั้นมาใส่
+
+โครงสร้าง JSON ที่ต้องการ:
+[
+  {
+    "title": "ปฏิทินการสอบความรู้ฯ ปี พ.ศ. 2569 : การสอบครั้งที่ 6/2569 [การสอบสมรรถนะร่วม] - วันที่สอบ PLE-CC1",
+    "description": "วันที่สอบ PLE-CC1 (เวลาสอบ 14.00 - 17.00 น.)",
+    "startDate": "2026-12-12",
+    "endDate": "2026-12-13",
+    "type_event": ["PLE-CC1"]
+  }
+]`;
 
         const result = await model.generateContent([
           { text: prompt },
@@ -74,20 +108,38 @@ export class SchedulesService {
         const cleanJson = responseText.replace(/```json|```/g, '').trim();
         const extractedData = JSON.parse(cleanJson);
 
-        // ตรวจสอบและ Re-format ข้อมูลเผื่อ AI พลาด
+        // ตรวจสอบและ Re-format ข้อมูลให้ตรงมาตรฐานระบบ
         return extractedData.map((event: any, index: number) => {
-          const types: string[] = event.type_event || [];
-          const hasGroup1 = types.some(t => /PLE-IP1|PC1|PHCP1/.test(t));
+          let types: string[] = Array.isArray(event.type_event) ? event.type_event : [];
 
-          if (hasGroup1) {
-            const others = types.filter(t => !/PLE-IP1|PC1|PHCP1/.test(t));
-            event.type_event = ["PLE-IP1, PC1, PHCP1", ...others];
+          // ปรับปรุงชื่อกลุ่มประเภทการสอบให้ตรงกับระบบ
+          const normalizedTypes: string[] = [];
+          for (const t of types) {
+            const trimmed = String(t).trim();
+            if (/PLE-IP1|PC1|PHCP1/i.test(trimmed)) {
+              if (!normalizedTypes.includes("PLE-IP1, PC1, PHCP1")) {
+                normalizedTypes.push("PLE-IP1, PC1, PHCP1");
+              }
+            } else if (/PLE-CC1/i.test(trimmed)) {
+              if (!normalizedTypes.includes("PLE-CC1")) normalizedTypes.push("PLE-CC1");
+            } else if (/PLE-CC2/i.test(trimmed)) {
+              if (!normalizedTypes.includes("PLE-CC2")) normalizedTypes.push("PLE-CC2");
+            } else if (/PLE-IP2/i.test(trimmed)) {
+              if (!normalizedTypes.includes("PLE-IP2")) normalizedTypes.push("PLE-IP2");
+            } else if (/PLE-PC2/i.test(trimmed)) {
+              if (!normalizedTypes.includes("PLE-PC2")) normalizedTypes.push("PLE-PC2");
+            } else if (/PLE-PHCP2/i.test(trimmed)) {
+              if (!normalizedTypes.includes("PLE-PHCP2")) normalizedTypes.push("PLE-PHCP2");
+            } else if (trimmed) {
+              if (!normalizedTypes.includes(trimmed)) normalizedTypes.push(trimmed);
+            }
           }
+          event.type_event = normalizedTypes;
 
           // ✅ Validation: ถ้า title ว่าง ให้สร้างจาก description หรือวันที่
           if (!event.title || event.title.trim() === '') {
             if (event.description) {
-              event.title = event.description.substring(0, 100); // ตัด 100 ตัวอักษรแรก
+              event.title = event.description.substring(0, 100);
             } else if (event.startDate) {
               event.title = `กิจกรรมวันที่ ${event.startDate}`;
             } else {
