@@ -224,7 +224,7 @@ export class ChatbotDocumentsService {
         const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
         // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
-        const batchSize = 25; 
+        const batchSize = 15; 
         for (let i = 0; i < chunks.length; i += batchSize) {
           const chunkBatch = chunks.slice(i, i + batchSize);
           
@@ -236,7 +236,7 @@ export class ChatbotDocumentsService {
           // ส่ง batch พร้อม retry แบบ exponential backoff หากติด rate limit
           let embeddings: any[] = [];
           let attempts = 0;
-          const maxAttempts = 3;
+          const maxAttempts = 6;
           while (attempts < maxAttempts) {
             try {
               const result = await embeddingModel.batchEmbedContents({ requests });
@@ -247,9 +247,10 @@ export class ChatbotDocumentsService {
               const errStr = embedError?.message || String(embedError);
               if (
                 attempts < maxAttempts &&
-                (errStr.includes('429') || errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('too many requests'))
+                (errStr.includes('429') || errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('too many requests') || errStr.toLowerCase().includes('resource_exhausted'))
               ) {
-                const waitTime = attempts * 2000;
+                // สำหรับ Free tier ให้รออย่างน้อย 5s, 10s, 15s, 20s, 25s เพื่อให้ rate limit window รีเซ็ต
+                const waitTime = Math.min(attempts * 5000, 30000);
                 this.logger.warn(`Gemini batch embed attempt ${attempts} hit rate limit, retrying in ${waitTime}ms...`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
               } else {
@@ -278,17 +279,17 @@ export class ChatbotDocumentsService {
           });
 
           const validVectors = vectors.filter(v => v.values && v.values.length > 0);
-          this.logger.log(`Batch ${(i / batchSize) + 1}: ${validVectors.length} valid vectors (${validVectors[0]?.values?.length ?? 0} dims each)`);
+          this.logger.log(`Batch ${Math.floor(i / batchSize) + 1}: ${validVectors.length} valid vectors (${validVectors[0]?.values?.length ?? 0} dims each)`);
 
           if (validVectors.length > 0 && this.pineconeIndex) {
             const ns = this.pineconeIndex.namespace(`doc-${savedDoc.id}`);
             await ns.upsert({ records: validVectors });
-            this.logger.log(`Upsert successful: Batch ${(i / batchSize) + 1} with ${validVectors.length} vectors into namespace doc-${savedDoc.id}`);
+            this.logger.log(`Upsert successful: Batch ${Math.floor(i / batchSize) + 1} with ${validVectors.length} vectors into namespace doc-${savedDoc.id}`);
           }
 
-          // พักระหว่าง batch เล็กน้อย เพื่อลดโอกาสชน Rate Limit
+          // พักระหว่าง batch เล็กน้อย เพื่อลดโอกาสชน Rate Limit ของ Free tier
           if (i + batchSize < chunks.length) {
-            await new Promise(resolve => setTimeout(resolve, 800));
+            await new Promise(resolve => setTimeout(resolve, 1500));
           }
         }
       }
