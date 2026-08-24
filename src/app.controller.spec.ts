@@ -1,21 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { getConnectionToken } from '@nestjs/typeorm';
+import { getDataSourceToken } from '@nestjs/typeorm';
 
 describe('AppController', () => {
   let appController: AppController;
 
   beforeEach(async () => {
-    const mockConnection = {
-      isConnected: true,
+    const mockDataSource = {
+      isInitialized: true,
+      query: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     };
 
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
       providers: [
         AppService,
-        { provide: getConnectionToken(), useValue: mockConnection },
+        { provide: getDataSourceToken(), useValue: mockDataSource },
       ],
     }).compile();
 
@@ -29,9 +30,11 @@ describe('AppController', () => {
   });
 
   describe('health', () => {
-    it('should return status ok and database true', async () => {
+    it('should return status ok and database connected true', async () => {
       const result = await appController.checkHealth();
-      expect(result).toEqual({ database: true, status: 'ok' });
+      expect(result.status).toBe('ok');
+      expect(result.database.connected).toBe(true);
+      expect(typeof result.uptimeSeconds).toBe('number');
     });
   });
 });
