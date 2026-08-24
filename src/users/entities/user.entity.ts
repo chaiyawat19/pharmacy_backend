@@ -39,7 +39,6 @@ export class User {
   bod: Date | null;
 
   @Column({ type: 'integer', nullable: true })
-  @Exclude()
   university_id: number | null;
 
   @ManyToOne(() => University, { nullable: true })
@@ -47,7 +46,6 @@ export class User {
   university: University | null;
 
   @Column({ type: 'integer', default: 1 })
-  @Exclude()
   role_id: number;
 
   @ManyToOne(() => Role)
