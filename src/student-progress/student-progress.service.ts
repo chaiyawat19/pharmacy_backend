@@ -141,7 +141,9 @@ export class StudentProgressService {
       attempt: `ครั้งที่ ${index + 1}`,
       date: this.formatThaiDate(exam.date),
       theta: this.roundTheta(exam.theta),
+      score: (exam as any).score ?? null,
       type: exam.type,
+      examName: exam.name,
       name: exam.name,
     }));
 
@@ -189,12 +191,14 @@ export class StudentProgressService {
           theta,
           status: this.getThetaStatus(theta),
           date: this.formatThaiDate(session.end_time ?? session.start_time),
-          responses: responses.map((r: any) => ({
+          responses: responses.map((r: any, idx: number) => ({
+            questionNumber: r.item_number ?? r.question_number ?? r.questionNumber ?? (idx + 1),
             itemId: r.item_id,
-            isCorrect: r.is_correct,
+            isCorrect: r.is_correct ?? r.isCorrect ?? false,
             responseTime: r.response_time_ms,
+            timeSpent: r.time_spent ?? (r.response_time_ms ? Math.round(r.response_time_ms / 1000) : 0),
             thetaBefore: this.roundTheta(r.theta_before ?? 0),
-            thetaAfter: this.roundTheta(r.theta_after ?? 0),
+            thetaAfter: this.roundTheta(r.theta_after ?? r.theta ?? 0),
           })),
         };
       });
@@ -244,7 +248,7 @@ export class StudentProgressService {
   }
 
   private roundScore(score: number) {
-    return Number(score.toFixed(0));
+    return Number(score.toFixed(2));
   }
 
   private formatThaiDate(date: Date | null) {
