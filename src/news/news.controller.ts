@@ -31,12 +31,6 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 export class NewsController {
   constructor(private readonly newsService: NewsService) { }
 
-  /** ดึงข้อมูลข่าวจาก URL อัตโนมัติ */
-  @Post('auto-fetch')
-  async autoFetch(@Body('url') url: string) {
-    return await this.newsService.autoFetchFacebook(url);
-  }
-
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {

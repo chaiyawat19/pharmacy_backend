@@ -28,6 +28,6 @@ export class BookmarkController {
   @Get()
   async findAll(@Request() req) {
     // เรียก findAllByUser แทน findAll
-    return this.bookmarkService.findAllByUser(req.user.id);
+    return this.bookmarkService.findAllByUser(req.user.userId);
   }
 }

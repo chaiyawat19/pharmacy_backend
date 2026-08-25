@@ -38,7 +38,7 @@ export class SchedulesService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const model = this.genAI.getGenerativeModel({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.6-flash',
         });
 
         const prompt = `คุณคือผู้เชี่ยวชาญการสกัดข้อมูลตารางกำหนดการสอบสภาเภสัชกรรมจากเอกสาร PDF

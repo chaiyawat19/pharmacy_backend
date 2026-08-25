@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { User } from '../users/entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
+import { CATSession } from '../cat/entities/cat-session.entity';
 import { UserDashboardDto } from './dto/user-dashboard.dto';
 
 const EXAM_DATE = new Date('2026-06-01'); // วันสอบจริง — ปรับได้
@@ -17,6 +18,9 @@ export class UserDashboardService {
 
     @InjectRepository(ExamSession)
     private sessionRepo: Repository<ExamSession>,
+
+    @InjectRepository(CATSession)
+    private catSessionRepo: Repository<CATSession>,
 
   ) {}
 
@@ -34,12 +38,21 @@ export class UserDashboardService {
   // ── 1. Stats ──────────────────────────────────────────────────────────────
 
   private async getStats(userId: number) {
+    // เฉพาะ Normal exam เท่านั้น — CAT session ไม่ set final_score ในตารางนี้
+    // (นับแยกเป็น cat_exams_count ด้านล่างแทน กันไม่ให้ไปทำ average_score เพี้ยน)
     const sessions = await this.sessionRepo
       .createQueryBuilder('s')
       .where('s.user_id = :userId', { userId })
+      .andWhere('s.session_type = :type', { type: 'NORMAL' })
       .andWhere('s.end_time IS NOT NULL')
       .orderBy('s.end_time', 'DESC')
       .getMany();
+
+    const catExamsCount = await this.catSessionRepo
+      .createQueryBuilder('c')
+      .where('c.user_id = :userId', { userId })
+      .andWhere('c.end_time IS NOT NULL')
+      .getCount();
 
     const totalExams = sessions.length;
     const passedExams = sessions.filter(
@@ -88,17 +101,20 @@ export class UserDashboardService {
       improvement_rate: Math.round(improvementRate * 10) / 10,
       days_until_exam: daysUntilExam,
       study_minutes: studyMinutes,
+      cat_exams_count: catExamsCount,
     };
   }
 
   // ── 2. Ranking ────────────────────────────────────────────────────────────
 
   private async getRanking(userId: number) {
+    // เฉพาะ Normal exam เท่านั้น — CAT ไม่มี final_score เทียบกันตรงๆ ได้ (กันไม่ให้ปนเข้ามาแบบไม่ตั้งใจ)
     const rankRaw = await this.sessionRepo
       .createQueryBuilder('s')
       .select('s.user_id', 'uid')
       .addSelect('AVG(s.final_score)', 'avg')
-      .where('s.end_time IS NOT NULL')
+      .where('s.session_type = :type', { type: 'NORMAL' })
+      .andWhere('s.end_time IS NOT NULL')
       .andWhere('s.final_score IS NOT NULL')
       .groupBy('s.user_id')
       .getRawMany();
@@ -146,7 +162,8 @@ export class UserDashboardService {
       .createQueryBuilder('s')
       .select('s.user_id', 'uid')
       .addSelect('AVG(s.final_score)', 'avg')
-      .where('s.end_time IS NOT NULL')
+      .where('s.session_type = :type', { type: 'NORMAL' })
+      .andWhere('s.end_time IS NOT NULL')
       .andWhere('s.end_time < :cutoff', { cutoff: sevenDaysAgo })
       .andWhere('s.final_score IS NOT NULL')
       .groupBy('s.user_id')

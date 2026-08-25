@@ -8,6 +8,7 @@ export class UserDashboardDto {
         improvement_rate: number
         days_until_exam: number
         study_minutes: number
+        cat_exams_count: number
     }
 
     ranking: {

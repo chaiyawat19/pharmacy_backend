@@ -6,9 +6,10 @@ import { UserDashboardService } from './user-dashboard.service';
 
 import { User } from '../users/entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
+import { CATSession } from '../cat/entities/cat-session.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, ExamSession])],
+  imports: [TypeOrmModule.forFeature([User, ExamSession, CATSession])],
   controllers: [UserDashboardController],
   providers: [UserDashboardService],
 })

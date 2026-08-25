@@ -15,11 +15,15 @@ export class StudentProgressController {
     @Query('page') page = '1',
     @Query('limit') limit = '10',
     @Query('search') search = '',
+    @Query('alphabet') alphabet = '',
+    @Query('dateFilter') dateFilter = '',
   ) {
     return this.studentProgressService.getStudents({
       page: Number(page),
       limit: Number(limit),
       search,
+      alphabet,
+      dateFilter,
     });
   }
 

@@ -7,6 +7,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -18,6 +19,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(ExamSession)
+    private readonly examSessionRepository: Repository<ExamSession>,
   ) {}
   async findOneById(user_id: number): Promise<User | null> {
     return this.userRepository.findOne({
@@ -46,7 +49,22 @@ export class UsersService {
       relations: { university: true, role: true },
       order: { created_at: 'DESC' },
     });
-    return users;
+
+    const examCounts = await this.examSessionRepository
+      .createQueryBuilder('s')
+      .select('s.user_id', 'userId')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('s.user_id')
+      .getRawMany();
+
+    const examCountMap = new Map<number, number>(
+      examCounts.map((r) => [Number(r.userId), Number(r.count)]),
+    );
+
+    return users.map((user) => ({
+      ...user,
+      exam_count: examCountMap.get(user.user_id) ?? 0,
+    }));
   }
 
   async findByEmail(email: string): Promise<User | null> {

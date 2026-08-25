@@ -43,15 +43,14 @@ export class BookmarkService {
   }
   async findAllByUser(userId: number) {
     return this.bookmarkRepository.find({
-      where: { user: { id: userId } as any },
+      where: { userId },
       relations: ['news'],
       order: { created_at: 'DESC' },
     });
   }
   async getMyBookmarkIds(userId: number) {
     const bookmarks = await this.bookmarkRepository.find({
-      where: { user: { id: userId } as any },
-      select: ['news'],
+      where: { userId },
       relations: ['news'],
     });
     return bookmarks.map(b => b.news.article_id);

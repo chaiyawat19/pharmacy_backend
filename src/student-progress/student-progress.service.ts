@@ -9,6 +9,24 @@ type StudentListQuery = {
   page: number;
   limit: number;
   search: string;
+  alphabet?: string;
+  dateFilter?: string;
+};
+
+const ALPHABET_RANGES: Record<string, [string, string]> = {
+  'ก-ฉ': ['ก', 'ฉ'],
+  'ช-ฎ': ['ช', 'ฎ'],
+  'ฏ-ณ': ['ฏ', 'ณ'],
+  'ด-ฟ': ['ด', 'ฟ'],
+  'ภ-ฮ': ['ภ', 'ฮ'],
+  'A-M': ['A', 'M'],
+  'N-Z': ['N', 'Z'],
+};
+
+const DATE_FILTER_DAYS: Record<string, number> = {
+  week: 7,
+  month: 30,
+  '3months': 90,
 };
 
 type StudentListItem = {
@@ -62,6 +80,36 @@ export class StudentProgressService {
             .orWhere('user.first_name ILIKE :search', { search: `%${search}%` })
             .orWhere('user.last_name ILIKE :search', { search: `%${search}%` });
         }),
+      );
+    }
+
+    const alphabetRange = query.alphabet
+      ? ALPHABET_RANGES[query.alphabet]
+      : undefined;
+    if (alphabetRange) {
+      const isEnglish = /^[A-Z]$/i.test(alphabetRange[0]);
+      const column = isEnglish
+        ? 'UPPER(SUBSTRING(user.first_name, 1, 1))'
+        : 'SUBSTRING(user.first_name, 1, 1)';
+      builder.andWhere(`${column} BETWEEN :alphaStart AND :alphaEnd`, {
+        alphaStart: alphabetRange[0],
+        alphaEnd: alphabetRange[1],
+      });
+    }
+
+    const dateFilterDays = query.dateFilter
+      ? DATE_FILTER_DAYS[query.dateFilter]
+      : undefined;
+    if (dateFilterDays) {
+      const cutoff = new Date(Date.now() - dateFilterDays * 24 * 60 * 60 * 1000);
+      builder.andWhere(
+        `EXISTS (
+          SELECT 1 FROM exam_sessions es
+          WHERE es.user_id = user.user_id
+            AND es.end_time IS NOT NULL
+            AND es.end_time >= :dateCutoff
+        )`,
+        { dateCutoff: cutoff },
       );
     }
 

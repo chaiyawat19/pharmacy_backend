@@ -284,7 +284,7 @@ export class ItemsBankService {
 
   private async extractQuestionsFromPdf(file: Express.Multer.File) {
     try {
-      const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
 
       const prompt = `ช่วยสกัดข้อสอบจากไฟล์ PDF นี้ โดยมีเงื่อนไขดังนี้:
       1. แต่ละข้อมีโจทย์ (question_text) และตัวเลือก (options)
