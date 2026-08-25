@@ -129,7 +129,7 @@ export class ItemsBankImportService {
 
       for (let r = startDataRow; r <= totalRows; r++) {
         const row = worksheet.getRow(r);
-        let questionText = this.getCellValueAsString(row.getCell(colMap['question'])).trim();
+        let questionText = this.getCellValueAsString(row.getCell(colMap['question']), true).trim();
 
         // 1. Question Image Extraction (Strictly scoped)
         let questionImageUrl = colMap['question_image']
@@ -182,7 +182,7 @@ export class ItemsBankImportService {
 
         // 2. Situation Text & Image Extraction (Strictly scoped)
         const rawSituationText = colMap['situation']
-          ? this.getCellValueAsString(row.getCell(colMap['situation'])).trim()
+          ? this.getCellValueAsString(row.getCell(colMap['situation']), true).trim()
           : '';
 
         let situationImageUrl = colMap['situation_image']
@@ -259,7 +259,7 @@ export class ItemsBankImportService {
         for (let o = 1; o <= 5; o++) {
           const colIdx = colMap[`option_${o}`];
           if (colIdx) {
-            const optText = this.getCellValueAsString(row.getCell(colIdx)).trim();
+            const optText = this.getCellValueAsString(row.getCell(colIdx), true).trim();
             if (optText) {
               options.push({ text: optText, isCorrect: false });
             }
@@ -268,7 +268,7 @@ export class ItemsBankImportService {
 
         // Explanation
         const explanation = colMap['explanation']
-          ? this.getCellValueAsString(row.getCell(colMap['explanation'])).trim()
+          ? this.getCellValueAsString(row.getCell(colMap['explanation']), true).trim()
           : '';
 
         // Answer Key
@@ -409,25 +409,116 @@ export class ItemsBankImportService {
   }
 
   /**
-   * Helper to convert any cell value to string, including hyperlinks
+   * Helper to convert any cell value to string, extracting RichText sub/superscripts and chemical formulas
    */
-  private getCellValueAsString(cell: ExcelJS.Cell): string {
+  private getCellValueAsString(cell: ExcelJS.Cell, preserveFormatting: boolean = false): string {
     if (!cell || cell.value === null || cell.value === undefined) return '';
+    let result = '';
+
     if (typeof cell.value === 'object') {
-      if ('result' in cell.value && cell.value.result !== null && cell.value.result !== undefined) {
-        return String(cell.value.result).trim();
-      }
-      if ('text' in cell.value && cell.value.text !== null && cell.value.text !== undefined) {
-        return String(cell.value.text).trim();
-      }
-      if ('hyperlink' in cell.value) {
-        return String((cell.value as any).hyperlink || (cell.value as any).text || '').trim();
-      }
       if ('richText' in cell.value && Array.isArray((cell.value as any).richText)) {
-        return (cell.value as any).richText.map((rt: any) => rt.text).join('').trim();
+        result = (cell.value as any).richText
+          .map((rt: any) => {
+            let text = rt.text || '';
+            if (!preserveFormatting) return text;
+
+            // Extract subscript or superscript from Excel cell font formatting
+            if (rt.font?.vertAlign === 'subscript') {
+              text = `<sub>${text}</sub>`;
+            } else if (rt.font?.vertAlign === 'superscript') {
+              text = `<sup>${text}</sup>`;
+            }
+            if (rt.font?.bold) {
+              text = `<strong>${text}</strong>`;
+            }
+            if (rt.font?.italic) {
+              text = `<em>${text}</em>`;
+            }
+            return text;
+          })
+          .join('')
+          .trim();
+      } else if ('result' in cell.value && cell.value.result !== null && cell.value.result !== undefined) {
+        result = String(cell.value.result).trim();
+      } else if ('text' in cell.value && cell.value.text !== null && cell.value.text !== undefined) {
+        result = String(cell.value.text).trim();
+      } else if ('hyperlink' in cell.value) {
+        result = String((cell.value as any).hyperlink || (cell.value as any).text || '').trim();
+      } else {
+        result = String(cell.value).trim();
       }
+    } else {
+      result = String(cell.value).trim();
     }
-    return String(cell.value).trim();
+
+    if (preserveFormatting && result) {
+      result = this.formatChemicalAndScientificFormulas(result);
+    }
+
+    return result;
+  }
+
+  /**
+   * Automatically detect and format chemical formulas, math equations, powers, and units
+   * Examples:
+   *  - Mg(OH)2  -> Mg(OH)<sub>2</sub>
+   *  - Al(OH)3  -> Al(OH)<sub>3</sub>
+   *  - Na2SO4   -> Na<sub>2</sub>SO<sub>4</sub>
+   *  - Na2CO3   -> Na<sub>2</sub>CO<sub>3</sub>
+   *  - H2O      -> H<sub>2</sub>O
+   *  - Ca2+     -> Ca<sup>2+</sup>
+   *  - 10^-3    -> 10<sup>-3</sup>
+   *  - mg/m2    -> mg/m<sup>2</sup>
+   */
+  private formatChemicalAndScientificFormulas(text: string): string {
+    if (!text) return '';
+
+    let formatted = text;
+
+    // 1. Explicit markup: ^{...} -> <sup>...</sup>, _{...} -> <sub>...</sub>
+    formatted = formatted.replace(/\^{([^}]+)}/g, '<sup>$1</sup>');
+    formatted = formatted.replace(/_{([^}]+)}/g, '<sub>$1</sub>');
+
+    // 2. Explicit symbols: ^2+, ^2-, ^2, ^-3, ^+ -> <sup>...</sup>
+    formatted = formatted.replace(/\^([0-9]+[+-]?|[+-][0-9]*|[a-zA-Z]+)/g, '<sup>$1</sup>');
+    formatted = formatted.replace(/_([0-9]+[+-]?|[a-zA-Z0-9]+)/g, '<sub>$1</sub>');
+
+    // 3. Units with superscripts: mg/m2, g/cm3, m2, m3, cm2, cm3, mm2, mm3
+    formatted = formatted.replace(/\b(mg|g|kg|mcg|mol|mmol)\/(m|cm|mm)2\b/gi, '$1/$2<sup>2</sup>');
+    formatted = formatted.replace(/\b(mg|g|kg|mcg|mol|mmol)\/(m|cm|mm)3\b/gi, '$1/$2<sup>3</sup>');
+    formatted = formatted.replace(/\b(m|cm|mm|dm)2\b/gi, '$1<sup>2</sup>');
+    formatted = formatted.replace(/\b(m|cm|mm|dm)3\b/gi, '$1<sup>3</sup>');
+
+    // 4. Power of 10: 10^-3, 10^5, 10^-6 -> 10<sup>...</sup>
+    formatted = formatted.replace(/\b10\^?([+-]?[0-9]+)\b/g, (match, p1) => {
+      if (match.includes('^')) {
+        return `10<sup>${p1}</sup>`;
+      }
+      return match;
+    });
+
+    // 5. Chemical Formulas with Subscripts and Ions (Mg(OH)2, Al(OH)3, Na2SO4, Na2CO3, H2O, etc.)
+    // If string already contains <sub> or <sup>, only process segments outside tags
+    formatted = formatted.replace(/\b((?:[A-Z][a-z]?|\([A-Za-z0-9]+\)|\[[A-Za-z0-9]+\])(?:[0-9]*(?:[A-Z][a-z]?|\([A-Za-z0-9]+\)|\[[A-Za-z0-9]+\]))*)([0-9]*[+-])?\b/g, (fullMatch, chemPart, charge) => {
+      // Don't format common English words
+      const commonWords = new Set(['A', 'AN', 'AT', 'AS', 'BE', 'BY', 'DO', 'GO', 'HE', 'IF', 'IN', 'IS', 'IT', 'ME', 'MY', 'NO', 'OF', 'ON', 'OR', 'SO', 'TO', 'UP', 'US', 'WE', 'AND', 'THE', 'FOR', 'NOT', 'BUT', 'CAN', 'HAD', 'HAS', 'HER', 'HIM', 'HIS', 'HOW', 'MAN', 'NEW', 'NOW', 'OLD', 'ONE', 'OUR', 'OUT', 'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID', 'ITS', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE', 'PAGE', 'SET', 'NAME', 'DATE', 'CODE']);
+      if (commonWords.has(fullMatch.toUpperCase()) && !/[0-9+\-]/.test(fullMatch)) {
+        return fullMatch;
+      }
+
+      // If it contains digits, parentheses, or charges -> format subscript / superscript
+      if (/[0-9\(\)\[\]]/.test(chemPart) || charge) {
+        let converted = chemPart.replace(/([A-Za-z\)\]])([0-9]+)/g, '$1<sub>$2</sub>');
+        if (charge) {
+          converted += `<sup>${charge}</sup>`;
+        }
+        return converted;
+      }
+
+      return fullMatch;
+    });
+
+    return formatted;
   }
 
   /**
