@@ -2183,4 +2183,5 @@ export class ItemsBankService {
       recent_activity: recentActivity
     };
   }
+
 }

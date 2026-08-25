@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, IsNull } from 'typeorm';
 import { CATSession } from './entities/cat-session.entity';
 import { IRTService, IRTResponse } from './irt.service';
 import { CATService } from './cat.service';
@@ -49,12 +49,19 @@ export class CATExamService {
         const existingCAT = await this.catSessionRepo.findOne({
             where: {
                 userId,
-                end_time: null as any,
+                end_time: IsNull(),
             },
+            relations: ['base_session'],
             order: { start_time: 'DESC' },
         });
 
-        if (existingCAT) {
+        if (
+            existingCAT &&
+            !existingCAT.end_time &&
+            !existingCAT.base_session?.end_time &&
+            !existingCAT.stop_reason &&
+            existingCAT.final_theta == null
+        ) {
             return {
                 message: 'พบเซสชันการสอบ CAT ที่ยังทำไม่เสร็จ',
                 session_id: existingCAT.session_id,
@@ -475,6 +482,7 @@ export class CATExamService {
             await this.sessionRepo.update(session.session_id, {
                 end_time: now,
             });
+            session.end_time = now;
             session.final_theta = session.current_theta;
             session.final_se = session.current_se;
             session.passed = this.catService.makeDecision(
@@ -552,6 +560,7 @@ export class CATExamService {
                 await this.sessionRepo.update(session.session_id, {
                     end_time: now,
                 });
+                session.end_time = now;
                 session.final_theta = session.current_theta;
                 session.final_se = session.current_se;
                 session.passed = this.catService.makeDecision(

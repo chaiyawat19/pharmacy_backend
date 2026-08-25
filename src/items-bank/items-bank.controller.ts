@@ -314,5 +314,10 @@ export class ItemsBankController {
   getDashboardStats(@Param('id') id: string) {
     return this.irtManagementService.getDashboardStats(+id);
   }
+
+
+
+  
 }
+
 
