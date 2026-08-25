@@ -68,8 +68,9 @@ export class ItemsBankImportService {
       throw new BadRequestException('ไฟล์ Excel ไม่มีข้อมูลหรือไม่มีหัวตาราง');
     }
 
-    // 1. Parse Embedded Images
+    // 1. Parse Embedded Images and Drawing Equations
     const embeddedImages = this.extractEmbeddedImages(workbook, worksheet);
+    const drawingTextMap = await this.extractDrawingTexts(Buffer.from(file.buffer));
 
     // 2. Identify Headers (Check Row 1 first, if question col not found try Row 2)
     let headerRowIndex = 1;
@@ -130,6 +131,9 @@ export class ItemsBankImportService {
       for (let r = startDataRow; r <= totalRows; r++) {
         const row = worksheet.getRow(r);
         let questionText = this.getCellValueAsString(row.getCell(colMap['question']), true).trim();
+        if (!questionText && colMap['question']) {
+          questionText = (drawingTextMap.get(`${r}_${colMap['question']}`) || '').trim();
+        }
 
         // 1. Question Image Extraction (Strictly scoped)
         let questionImageUrl = colMap['question_image']
@@ -181,9 +185,12 @@ export class ItemsBankImportService {
         }
 
         // 2. Situation Text & Image Extraction (Strictly scoped)
-        const rawSituationText = colMap['situation']
+        let rawSituationText = colMap['situation']
           ? this.getCellValueAsString(row.getCell(colMap['situation']), true).trim()
           : '';
+        if (!rawSituationText && colMap['situation']) {
+          rawSituationText = (drawingTextMap.get(`${r}_${colMap['situation']}`) || '').trim();
+        }
 
         let situationImageUrl = colMap['situation_image']
           ? this.getCellValueAsString(row.getCell(colMap['situation_image'])).trim()
@@ -259,7 +266,10 @@ export class ItemsBankImportService {
         for (let o = 1; o <= 5; o++) {
           const colIdx = colMap[`option_${o}`];
           if (colIdx) {
-            const optText = this.getCellValueAsString(row.getCell(colIdx), true).trim();
+            let optText = this.getCellValueAsString(row.getCell(colIdx), true).trim();
+            if (!optText) {
+              optText = (drawingTextMap.get(`${r}_${colIdx}`) || '').trim();
+            }
             if (optText) {
               options.push({ text: optText, isCorrect: false });
             }
@@ -267,9 +277,12 @@ export class ItemsBankImportService {
         }
 
         // Explanation
-        const explanation = colMap['explanation']
+        let explanation = colMap['explanation']
           ? this.getCellValueAsString(row.getCell(colMap['explanation']), true).trim()
           : '';
+        if (!explanation && colMap['explanation']) {
+          explanation = (drawingTextMap.get(`${r}_${colMap['explanation']}`) || '').trim();
+        }
 
         // Answer Key
         const rawAnswerKey = colMap['answer_key']
@@ -483,42 +496,95 @@ export class ItemsBankImportService {
     formatted = formatted.replace(/\^([0-9]+[+-]?|[+-][0-9]*|[a-zA-Z]+)/g, '<sup>$1</sup>');
     formatted = formatted.replace(/_([0-9]+[+-]?|[a-zA-Z0-9]+)/g, '<sub>$1</sub>');
 
-    // 3. Units with superscripts: mg/m2, g/cm3, m2, m3, cm2, cm3, mm2, mm3
+    // 5. Units with superscripts: mg/m2, g/cm3, m2, m3, cm2, cm3, mm2, mm3
     formatted = formatted.replace(/\b(mg|g|kg|mcg|mol|mmol)\/(m|cm|mm)2\b/gi, '$1/$2<sup>2</sup>');
     formatted = formatted.replace(/\b(mg|g|kg|mcg|mol|mmol)\/(m|cm|mm)3\b/gi, '$1/$2<sup>3</sup>');
     formatted = formatted.replace(/\b(m|cm|mm|dm)2\b/gi, '$1<sup>2</sup>');
     formatted = formatted.replace(/\b(m|cm|mm|dm)3\b/gi, '$1<sup>3</sup>');
 
-    // 4. Power of 10: 10^-3, 10^5, 10^-6 -> 10<sup>...</sup>
-    formatted = formatted.replace(/\b10\^?([+-]?[0-9]+)\b/g, (match, p1) => {
-      if (match.includes('^')) {
-        return `10<sup>${p1}</sup>`;
-      }
-      return match;
-    });
+    // 6. Specific ion / pump patterns: H+, K+, Na+, Ca2+, Mg2+, Cl-, Fe2+, Fe3+, OH-, HCO3-, etc.
+    // Handles expressions like H+/K+ ATPase, H+ / K+ ATPase, Na+/K+ pump, Ca2+
+    formatted = formatted.replace(
+      /(?:\b|(?<=[^A-Za-z0-9]))(H|K|Na|Ca|Mg|Cl|Fe|Zn|Cu|Ba|Al|Li|Ag|NH4|HCO3|OH|SO4|NO3|PO4)([0-9]*[+-])(?=[\s\/\-),.;:!?]|$)/g,
+      (match, element, charge) => {
+        const base = element.replace(/([A-Za-z\)\]])([0-9]+)/g, '$1<sub>$2</sub>');
+        return `${base}<sup>${charge}</sup>`;
+      },
+    );
 
-    // 5. Chemical Formulas with Subscripts and Ions (Mg(OH)2, Al(OH)3, Na2SO4, Na2CO3, H2O, etc.)
-    // If string already contains <sub> or <sup>, only process segments outside tags
-    formatted = formatted.replace(/\b((?:[A-Z][a-z]?|\([A-Za-z0-9]+\)|\[[A-Za-z0-9]+\])(?:[0-9]*(?:[A-Z][a-z]?|\([A-Za-z0-9]+\)|\[[A-Za-z0-9]+\]))*)([0-9]*[+-])?\b/g, (fullMatch, chemPart, charge) => {
-      // Don't format common English words
-      const commonWords = new Set(['A', 'AN', 'AT', 'AS', 'BE', 'BY', 'DO', 'GO', 'HE', 'IF', 'IN', 'IS', 'IT', 'ME', 'MY', 'NO', 'OF', 'ON', 'OR', 'SO', 'TO', 'UP', 'US', 'WE', 'AND', 'THE', 'FOR', 'NOT', 'BUT', 'CAN', 'HAD', 'HAS', 'HER', 'HIM', 'HIS', 'HOW', 'MAN', 'NEW', 'NOW', 'OLD', 'ONE', 'OUR', 'OUT', 'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID', 'ITS', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE', 'PAGE', 'SET', 'NAME', 'DATE', 'CODE']);
-      if (commonWords.has(fullMatch.toUpperCase()) && !/[0-9+\-]/.test(fullMatch)) {
-        return fullMatch;
-      }
-
-      // If it contains digits, parentheses, or charges -> format subscript / superscript
-      if (/[0-9\(\)\[\]]/.test(chemPart) || charge) {
-        let converted = chemPart.replace(/([A-Za-z\)\]])([0-9]+)/g, '$1<sub>$2</sub>');
-        if (charge) {
-          converted += `<sup>${charge}</sup>`;
-        }
-        return converted;
-      }
-
-      return fullMatch;
-    });
+    // 7. Chemical formulas with subscripts (e.g. Mg(OH)2, Al(OH)3, Na2SO4, Na2CO3, H2O, CO2, CaCl2, C6H12O6)
+    formatted = formatted.replace(
+      /(?:\b|(?<=[^A-Za-z0-9]))((?:[A-Z][a-z]?|\([A-Za-z0-9]+\)|\[[A-Za-z0-9]+\])(?:[0-9]*(?:[A-Z][a-z]?|\([A-Za-z0-9]+\)|\[[A-Za-z0-9]+\]))*[0-9]+(?:\([A-Za-z0-9]+\)|\[[A-Za-z0-9]+\]|[A-Z][a-z]?[0-9]*)*)(?=[\s\/\-),.;:!?]|$)/g,
+      (match, chemFormula) => {
+        return chemFormula.replace(/([A-Za-z\)\]])([0-9]+)/g, '$1<sub>$2</sub>');
+      },
+    );
 
     return formatted;
+  }
+
+  /**
+   * Extract texts and mathematical formulas from Excel Drawing/Shape/Equation objects
+   */
+  private async extractDrawingTexts(buffer: Buffer): Promise<Map<string, string>> {
+    const drawingMap = new Map<string, string>();
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const JSZip = require('jszip');
+      const zip = await JSZip.loadAsync(buffer);
+      const drawingFiles = Object.keys(zip.files).filter(f => f.startsWith('xl/drawings/drawing') && f.endsWith('.xml'));
+
+      for (const fileName of drawingFiles) {
+        const xmlContent = await zip.file(fileName).async('text');
+
+        // Match anchors: <xdr:twoCellAnchor> or <xdr:oneCellAnchor>
+        const anchorRegex = /<xdr:(?:twoCellAnchor|oneCellAnchor)[\s\S]*?<\/xdr:(?:twoCellAnchor|oneCellAnchor)>/g;
+        let match: RegExpExecArray | null;
+
+        while ((match = anchorRegex.exec(xmlContent)) !== null) {
+          const anchorXml = match[0];
+
+          // Extract starting cell col and row
+          const fromColMatch = anchorXml.match(/<xdr:from>[\s\S]*?<xdr:col>(\d+)<\/xdr:col>/);
+          const fromRowMatch = anchorXml.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
+
+          if (fromColMatch && fromRowMatch) {
+            const col = parseInt(fromColMatch[1], 10) + 1; // 1-indexed
+            const row = parseInt(fromRowMatch[1], 10) + 1; // 1-indexed
+
+            let text = '';
+
+            // Handle Math Subscript: <m:sSub> ... <m:e>...</m:e> ... <m:sub>...</m:sub> ... </m:sSub>
+            let processedXml = anchorXml.replace(/<m:sSub>[\s\S]*?<m:e>([\s\S]*?)<\/m:e>[\s\S]*?<m:sub>([\s\S]*?)<\/m:sub>[\s\S]*?<\/m:sSub>/g, (_, baseXml, subXml) => {
+              const baseText = (baseXml.match(/<m:t[^>]*>([^<]*)<\/m:t>/g) || []).map((t: string) => t.replace(/<[^>]+>/g, '')).join('');
+              const subText = (subXml.match(/<m:t[^>]*>([^<]*)<\/m:t>/g) || []).map((t: string) => t.replace(/<[^>]+>/g, '')).join('');
+              return `${baseText}<sub>${subText}</sub>`;
+            });
+
+            // Handle Math Superscript: <m:sSup> ... <m:e>...</m:e> ... <m:sup>...</m:sup> ... </m:sSup>
+            processedXml = processedXml.replace(/<m:sSup>[\s\S]*?<m:e>([\s\S]*?)<\/m:e>[\s\S]*?<m:sup>([\s\S]*?)<\/m:sup>[\s\S]*?<\/m:sSup>/g, (_, baseXml, supXml) => {
+              const baseText = (baseXml.match(/<m:t[^>]*>([^<]*)<\/m:t>/g) || []).map((t: string) => t.replace(/<[^>]+>/g, '')).join('');
+              const supText = (supXml.match(/<m:t[^>]*>([^<]*)<\/m:t>/g) || []).map((t: string) => t.replace(/<[^>]+>/g, '')).join('');
+              return `${baseText}<sup>${supText}</sup>`;
+            });
+
+            // Extract all combined text elements including formed tags
+            const combinedMatches = processedXml.match(/(?:<(?:a:t|m:t)[^>]*>([^<]*)<\/(?:a:t|m:t)>|<sub>.*?<\/sub>|<sup>.*?<\/sup>)/g);
+            if (combinedMatches) {
+              text = combinedMatches.map(t => t.startsWith('<sub') || t.startsWith('<sup') ? t : t.replace(/<[^>]+>/g, '')).join('').trim();
+            }
+
+            if (text) {
+              const formattedText = this.formatChemicalAndScientificFormulas(text);
+              drawingMap.set(`${row}_${col}`, formattedText);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to extract drawing texts:', err);
+    }
+    return drawingMap;
   }
 
   /**
