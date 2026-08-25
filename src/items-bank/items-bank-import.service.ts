@@ -46,7 +46,11 @@ export class ItemsBankImportService {
   /**
    * Import questions from Excel buffer into a specific Item Bank
    */
-  async importExcelToBank(item_bank_id: number, file: Express.Multer.File) {
+  async importExcelToBank(
+    item_bank_id: number,
+    file: Express.Multer.File,
+    mode: 'append' | 'overwrite' = 'append',
+  ) {
     if (!file || !file.buffer) {
       throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
     }
@@ -115,13 +119,69 @@ export class ItemsBankImportService {
       let createdTopicsCount = 0;
       let createdSubTopicsCount = 0;
 
+      // If overwrite mode is selected, remove existing bank items and situations
+      if (mode === 'overwrite') {
+        const existingBankItems = await queryRunner.manager.find(ItemBankItem, {
+          where: { item_bank_id },
+        });
+        const existingItemIds = existingBankItems.map((bi) => bi.item_id);
+
+        if (existingItemIds.length > 0) {
+          // Delete ItemSubTopic
+          await queryRunner.manager
+            .createQueryBuilder()
+            .delete()
+            .from(ItemSubTopic)
+            .where('item_id IN (:...ids)', { ids: existingItemIds })
+            .execute();
+
+          // Delete AnswerOption
+          await queryRunner.manager
+            .createQueryBuilder()
+            .delete()
+            .from(AnswerOption)
+            .where('item_id IN (:...ids)', { ids: existingItemIds })
+            .execute();
+
+          // Delete ItemBankItem
+          await queryRunner.manager
+            .createQueryBuilder()
+            .delete()
+            .from(ItemBankItem)
+            .where('item_bank_id = :item_bank_id', { item_bank_id })
+            .execute();
+
+          // Delete Item
+          await queryRunner.manager
+            .createQueryBuilder()
+            .delete()
+            .from(Item)
+            .where('item_id IN (:...ids)', { ids: existingItemIds })
+            .execute();
+        }
+
+        // Delete existing Situations
+        await queryRunner.manager
+          .createQueryBuilder()
+          .delete()
+          .from(ItemSituation)
+          .where('item_bank_id = :item_bank_id', { item_bank_id })
+          .execute();
+      }
+
       // Existing Counts for display_order
-      let existingSituationsCount = await queryRunner.manager.count(ItemSituation, {
-        where: { item_bank_id }
-      });
-      let existingItemsCount = await queryRunner.manager.count(ItemBankItem, {
-        where: { item_bank_id }
-      });
+      let existingSituationsCount =
+        mode === 'overwrite'
+          ? 0
+          : await queryRunner.manager.count(ItemSituation, {
+              where: { item_bank_id },
+            });
+      let existingItemsCount =
+        mode === 'overwrite'
+          ? 0
+          : await queryRunner.manager.count(ItemBankItem, {
+              where: { item_bank_id },
+            });
 
       let currentSituation: ItemSituation | null = null;
       let currentSituationText: string = '';

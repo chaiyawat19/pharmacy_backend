@@ -232,8 +232,9 @@ export class ItemsBankController {
   importExcel(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body('mode') mode?: 'append' | 'overwrite',
   ) {
-    return this.itemsBankImportService.importExcelToBank(+id, file);
+    return this.itemsBankImportService.importExcelToBank(+id, file, mode || 'append');
   }
 
 
