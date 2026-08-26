@@ -11,6 +11,7 @@ import { MailService } from '../mail/mail.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
 import { OTP } from './entities/otp.entity';
+import { PaymentService } from '../payment/payment.service';
 
 @Injectable()
 export class AuthService {
@@ -18,6 +19,7 @@ export class AuthService {
     private readonly userService: UsersService,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly paymentService: PaymentService,
     @InjectRepository(OTP)
     private readonly otpRepo: Repository<OTP>,
   ) {}
@@ -45,17 +47,22 @@ export class AuthService {
     if (user.id) {
       await this.userService.updateLastLogin(user.id);
     }
+
+    const effectiveRoleId = user.id
+      ? await this.paymentService.getEffectiveRoleId(user.id, user.role_id)
+      : user.role_id;
+
     const payload = {
       sub: user.id,
       email: user.email,
-      role_id: user.role_id,
+      role_id: effectiveRoleId,
       first_name: user.first_name,
       last_name: user.last_name,
       university: user.university?.name,
     };
 
     const accessToken = this.jwtService.sign(payload);
-    return { accessToken, role_id: user.role_id };
+    return { accessToken, role_id: effectiveRoleId };
   }
 
   async socialLogin(profile: any): Promise<string> {
@@ -79,10 +86,15 @@ export class AuthService {
       await this.userService.save(user);
     }
 
+    const effectiveRoleId = await this.paymentService.getEffectiveRoleId(
+      user.user_id,
+      user.role_id,
+    );
+
     return this.jwtService.sign({
       sub: user.user_id,
       email: user.email,
-      role_id: user.role_id,
+      role_id: effectiveRoleId,
     });
   }
   async forgotPassword(email: string) {

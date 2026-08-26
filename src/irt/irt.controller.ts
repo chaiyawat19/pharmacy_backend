@@ -1,6 +1,6 @@
 import { Controller, Post, Get } from '@nestjs/common';
 import { IrtService } from './irt.service';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('admin/irt')
 @Roles(2) // Admin only

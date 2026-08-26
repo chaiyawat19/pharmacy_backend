@@ -1,6 +1,12 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 
+/** ไฟล์แนบอีเมล เช่น ใบเสร็จ PDF */
+export type MailAttachment = {
+    filename: string;
+    content: Buffer;
+};
+
 @Injectable()
 export class MailService {
     private getTransporter() {
@@ -16,7 +22,7 @@ export class MailService {
         });
     }
 
-    private async sendViaBrevo(to: string, subject: string, html: string) {
+    private async sendViaBrevo(to: string, subject: string, html: string, attachment?: MailAttachment) {
         const apiKey = process.env.BREVO_API_KEY;
         const senderEmail = process.env.MAIL_USER || 'suthinantong123@gmail.com';
         const res = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -30,6 +36,11 @@ export class MailService {
                 to: [{ email: to }],
                 subject,
                 htmlContent: html,
+                ...(attachment && {
+                    attachment: [
+                        { name: attachment.filename, content: attachment.content.toString('base64') },
+                    ],
+                }),
             }),
         });
 
@@ -40,7 +51,7 @@ export class MailService {
         return await res.json();
     }
 
-    private async sendViaResend(to: string, subject: string, html: string) {
+    private async sendViaResend(to: string, subject: string, html: string, attachment?: MailAttachment) {
         const apiKey = process.env.RESEND_API_KEY;
         const res = await fetch('https://api.resend.com/emails', {
             method: 'POST',
@@ -53,6 +64,11 @@ export class MailService {
                 to: [to],
                 subject,
                 html,
+                ...(attachment && {
+                    attachments: [
+                        { filename: attachment.filename, content: attachment.content.toString('base64') },
+                    ],
+                }),
             }),
         });
 
@@ -92,6 +108,80 @@ export class MailService {
         } catch (error) {
             console.error('Mail Sending Error:', error);
             throw new InternalServerErrorException('ไม่สามารถส่งอีเมลได้ในขณะนี้: ' + (error?.message || ''));
+        }
+    }
+
+    /** ส่งอีเมลผ่านช่องทางที่ตั้งค่าไว้ (Brevo → Resend → SMTP ตามลำดับ) แนบไฟล์ได้ */
+    private async dispatch(to: string, subject: string, html: string, attachment?: MailAttachment) {
+        if (process.env.BREVO_API_KEY) {
+            await this.sendViaBrevo(to, subject, html, attachment);
+        } else if (process.env.RESEND_API_KEY) {
+            await this.sendViaResend(to, subject, html, attachment);
+        } else {
+            const transporter = this.getTransporter();
+            await transporter.sendMail({
+                from: `"เภสัชพร้อมสอบ" <${process.env.MAIL_USER}>`,
+                to,
+                subject,
+                html,
+                ...(attachment && {
+                    attachments: [
+                        { filename: attachment.filename, content: attachment.content },
+                    ],
+                }),
+            });
+        }
+    }
+
+    /** เตือนล่วงหน้าก่อนสิทธิ์ผู้ดูแลระบบหมดอายุ (เรียกจาก cron รายวันใน PaymentService) */
+    async sendSubscriptionExpiryReminder(email: string, expiresAt: Date, daysLeft: number) {
+        const subject = `สิทธิ์ผู้ดูแลระบบจะหมดอายุในอีก ${daysLeft} วัน - เภสัชพร้อมสอบ`;
+        const expiresText = expiresAt.toLocaleDateString('th-TH', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+        });
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const html = `
+          <div style="font-family: sans-serif; padding: 20px;">
+            <h2>สวัสดีครับ,</h2>
+            <p>สิทธิ์ผู้ดูแลระบบของคุณจะหมดอายุในอีก <strong>${daysLeft} วัน</strong> (วันที่ ${expiresText})</p>
+            <p>ต่ออายุได้ที่หน้าอัปเกรดสิทธิ์เพื่อใช้งานต่อเนื่อง</p>
+            <a href="${frontendUrl}/upgrade-admin" style="background-color: #4f46e5; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 10px;">ต่ออายุสิทธิ์</a>
+          </div>
+        `;
+
+        try {
+            await this.dispatch(email, subject, html);
+        } catch (error) {
+            console.error('Expiry Reminder Mail Error:', error);
+            throw new InternalServerErrorException('ไม่สามารถส่งอีเมลแจ้งเตือนได้ในขณะนี้: ' + (error?.message || ''));
+        }
+    }
+
+    /** ยืนยันการชำระเงิน — แนบใบเสร็จ PDF ไปด้วยถ้าสร้างสำเร็จ */
+    async sendPaymentConfirmation(email: string, expiresAt: Date, receipt?: MailAttachment) {
+        const subject = 'ชำระเงินสำเร็จ - สิทธิ์ผู้ดูแลระบบ - เภสัชพร้อมสอบ';
+        const expiresText = expiresAt.toLocaleDateString('th-TH', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+        });
+        const html = `
+          <div style="font-family: sans-serif; padding: 20px;">
+            <h2>สวัสดีครับ,</h2>
+            <p>การชำระเงินของคุณสำเร็จแล้ว คุณได้รับสิทธิ์ผู้ดูแลระบบเรียบร้อย</p>
+            <p>สิทธิ์นี้จะหมดอายุวันที่ <strong>${expiresText}</strong></p>
+            <p>เข้าใช้งานได้ทันทีที่หน้าผู้ดูแลระบบของเว็บไซต์</p>
+            ${receipt ? '<p style="color:#6b7280;font-size:14px;">แนบใบเสร็จรับเงินมาพร้อมอีเมลฉบับนี้แล้ว</p>' : ''}
+          </div>
+        `;
+
+        try {
+            await this.dispatch(email, subject, html, receipt);
+        } catch (error) {
+            console.error('Payment Confirmation Mail Error:', error);
+            throw new InternalServerErrorException('ไม่สามารถส่งอีเมลยืนยันได้ในขณะนี้: ' + (error?.message || ''));
         }
     }
 

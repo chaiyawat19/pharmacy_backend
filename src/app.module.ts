@@ -9,6 +9,7 @@ import { RolesModule } from './roles/roles.module';
 import { AuthModule } from './auth/auth.module';
 
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { RolesGuard } from './common/guards/roles.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -29,10 +30,12 @@ import { IrtModule } from './irt/irt.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { StudentProgressModule } from './student-progress/student-progress.module';
+import { PaymentModule } from './payment/payment.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(), // cron — ใช้ส่งอีเมลเตือนก่อน subscription หมดอายุ
     // ── S2.2: Rate Limiting ────────────────────────────────────────────────
     ThrottlerModule.forRoot([
       {
@@ -44,6 +47,11 @@ import { StudentProgressModule } from './student-progress/student-progress.modul
         name: 'auth',
         ttl: 60000, // 1 นาที
         limit: 60, // 60 requests/นาที สำหรับ auth endpoints
+      },
+      {
+        name: 'payment',
+        ttl: 60000, // 1 นาที
+        limit: 10, // 10 requests/นาที กันสแปมอัปโหลดสลิป/generate QR
       },
     ]),
     TypeOrmModule.forRootAsync({
@@ -93,6 +101,7 @@ import { StudentProgressModule } from './student-progress/student-progress.modul
     ChatbotModule,
     StudentProgressModule,
     UserDashboardModule,
+    PaymentModule,
   ],
   controllers: [AppController],
   providers: [

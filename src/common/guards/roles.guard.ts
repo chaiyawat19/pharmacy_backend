@@ -6,6 +6,15 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
+/**
+ * ลำดับชั้นสิทธิ์ — role ที่สูงกว่าทำทุกอย่างที่ role ต่ำกว่าทำได้
+ * Super Admin (3) จึงผ่านทุก endpoint ที่กำกับ @Roles(2) ไว้โดยไม่ต้องไล่แก้ทีละจุด
+ * แต่ @Roles(3) ยังสงวนไว้ให้ Super Admin เท่านั้น — Admin ธรรมดาเข้าไม่ได้
+ */
+const ROLE_INHERITANCE: Record<number, number[]> = {
+  3: [3, 2],
+};
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
@@ -35,7 +44,8 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('User not authenticated');
     }
 
-    const hasRole = requiredRoles.includes(user.role_id);
+    const effectiveRoles = ROLE_INHERITANCE[user.role_id] ?? [user.role_id];
+    const hasRole = requiredRoles.some((role) => effectiveRoles.includes(role));
 
     if (!hasRole) {
       throw new ForbiddenException('You do not have permission');

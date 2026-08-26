@@ -17,10 +17,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    // role_id: 1 = user ทั่วไป, 2 = admin (ตรงกับตาราง roles ใน DB)
+    // role_id: 1 = user ทั่วไป, 2 = admin (ซื้อสิทธิ์รายปี), 3 = super admin (ตรงกับตาราง roles ใน DB)
     const rolesMap: Record<number, string> = {
       1: 'user',
       2: 'admin',
+      3: 'super_admin',
     };
     const roleName = rolesMap[payload.role_id] || 'guest';
 

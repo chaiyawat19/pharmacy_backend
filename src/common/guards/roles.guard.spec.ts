@@ -93,4 +93,42 @@ describe('RolesGuard', () => {
     const ctx = createMockContext({ user: { role_id: 1 } });
     expect(guard.canActivate(ctx)).toBe(true);
   });
+
+  // ── ลำดับชั้นสิทธิ์: Super Admin (3) สืบทอดสิทธิ์ของ Admin (2) ──
+
+  it('ควร allow Super Admin (3) เข้า endpoint ที่กำกับ @Roles(2)', () => {
+    reflector.get
+      .mockReturnValueOnce(false) // isPublic
+      .mockReturnValueOnce([2]);  // ต้องการ admin
+
+    const ctx = createMockContext({ user: { role_id: 3 } });
+    expect(guard.canActivate(ctx)).toBe(true);
+  });
+
+  it('ควร allow Super Admin (3) เข้า endpoint ที่กำกับ @Roles(3)', () => {
+    reflector.get
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce([3]);
+
+    const ctx = createMockContext({ user: { role_id: 3 } });
+    expect(guard.canActivate(ctx)).toBe(true);
+  });
+
+  it('ควร block Admin ธรรมดา (2) ไม่ให้เข้า endpoint ที่กำกับ @Roles(3)', () => {
+    reflector.get
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce([3]); // เฉพาะ Super Admin
+
+    const ctx = createMockContext({ user: { role_id: 2 } });
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+  });
+
+  it('ควร block user ธรรมดา (1) ไม่ให้เข้า endpoint ที่กำกับ @Roles(3)', () => {
+    reflector.get
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce([3]);
+
+    const ctx = createMockContext({ user: { role_id: 1 } });
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+  });
 });

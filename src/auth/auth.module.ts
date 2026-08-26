@@ -11,6 +11,7 @@ import { LocalStrategy } from './strategies/local.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { MailModule } from '../mail/mail.module';
 import { OTP } from './entities/otp.entity';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { OTP } from './entities/otp.entity';
     forwardRef(() => UsersModule),
     PassportModule,
     MailModule,
+    PaymentModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({

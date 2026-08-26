@@ -8,8 +8,8 @@ import { CreateSituationDto } from './dto/create-situation.dto';
 import { CreateItemsDto } from './dto/create-items.dto';
 import { ReorderItemsDto } from './dto/reorder-items.dto';
 import { UpdateItemsBankDto } from './dto/update-items-bank.dto';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { Public } from 'src/common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { CreateAnswerOptionDto } from './dto/answer_options.dto';
 import { CreateBulkQuestionsDto } from './dto/create-bulk-questions.dto';
 

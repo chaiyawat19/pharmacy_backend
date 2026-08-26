@@ -11,8 +11,8 @@ import {
 import { University } from '../../universities/entities/university.entity';
 import { Role } from '../../roles/entities/role.entity';
 import { Exclude } from 'class-transformer';
-import { Note } from 'src/notes/entities/note.entity';
-import { Bookmark } from 'src/bookmark/entities/bookmark.entity';
+import { Note } from '../../notes/entities/note.entity';
+import { Bookmark } from '../../bookmark/entities/bookmark.entity';
 
 @Entity('users')
 export class User {

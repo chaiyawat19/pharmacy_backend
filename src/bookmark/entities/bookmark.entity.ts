@@ -7,7 +7,7 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-import { NewsArticle } from 'src/news/entities/news.entity'; 
+import { NewsArticle } from '../../news/entities/news.entity'; 
 
 @Entity('user_bookmarks')
 export class Bookmark {
