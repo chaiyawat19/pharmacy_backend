@@ -456,7 +456,6 @@ export class IrtManagementService implements OnModuleInit {
         error_rate: errorRate,
         avg_time_seconds: avgTimeSeconds,
         wrong_users: wrongUsersMap.get(stat.item_id) ?? [],
-        
       };
     });
 

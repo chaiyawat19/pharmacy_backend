@@ -42,6 +42,26 @@ export class UniversitiesService {
   }
 
   async getLeaderboard(limit = 10) {
+    // 1. Subquery: ดึงคะแนนครั้งที่ดีที่สุด (MAX) และจำนวนครั้งที่สอบของแต่ละ user_id
+    const userBestSubquery = this.examSessionRepository
+      .createQueryBuilder('es')
+      .innerJoin('es.user', 'usr')
+      .select('usr.user_id', 'user_id')
+      .addSelect('usr.university_id', 'university_id')
+      .addSelect('MAX(es.final_score)', 'best_score')
+      .addSelect('COUNT(es.session_id)', 'user_exams')
+      .where('(es.session_type = :type OR es.session_type = :lowerType OR es.session_type IS NULL)', {
+        type: 'NORMAL',
+        lowerType: 'normal',
+      })
+      .andWhere('es.end_time IS NOT NULL')
+      .andWhere('es.final_score IS NOT NULL')
+      .andWhere('(usr.role_id != :adminRoleId OR usr.role_id IS NULL)', { adminRoleId: 2 })
+      .andWhere('usr.university_id IS NOT NULL')
+      .groupBy('usr.user_id')
+      .addGroupBy('usr.university_id');
+
+    // 2. Main Query: รวมคะแนนเฉลี่ยระดับมหาวิทยาลัยจาก Best Score ของนักศึกษาแต่ละคน
     const rows: Array<{
       university_id: string;
       university_name: string;
@@ -49,25 +69,20 @@ export class UniversitiesService {
       top_score: string;
       total_students: string;
       total_exams: string;
-    }> = await this.examSessionRepository
-      .createQueryBuilder('es')
-      .innerJoin('es.user', 'usr')
-      .innerJoin('usr.university', 'univ')
+    }> = await this.examSessionRepository.manager
+      .createQueryBuilder()
       .select('univ.university_id', 'university_id')
       .addSelect('univ.name', 'university_name')
-      .addSelect('AVG(es.final_score)', 'avg_score')
-      .addSelect('MAX(es.final_score)', 'top_score')
-      .addSelect('COUNT(DISTINCT usr.user_id)', 'total_students')
-      .addSelect('COUNT(es.session_id)', 'total_exams')
-      .where('es.session_type = :type', { type: 'NORMAL' })
-      .andWhere('es.end_time IS NOT NULL')
-      .andWhere('es.final_score IS NOT NULL')
-      .andWhere('usr.role_id = :roleId', { roleId: 1 })
-      .andWhere('usr.university_id IS NOT NULL')
+      .addSelect('AVG(ub.best_score)', 'avg_score')
+      .addSelect('MAX(ub.best_score)', 'top_score')
+      .addSelect('COUNT(ub.user_id)', 'total_students')
+      .addSelect('SUM(ub.user_exams)', 'total_exams')
+      .from(`(${userBestSubquery.getQuery()})`, 'ub')
+      .setParameters(userBestSubquery.getParameters())
+      .innerJoin('universities', 'univ', 'univ.university_id = ub.university_id')
       .groupBy('univ.university_id')
       .addGroupBy('univ.name')
-      .having('COUNT(DISTINCT usr.user_id) >= :minStudents', { minStudents: 1 })
-      .orderBy('avg_score', 'DESC')
+      .orderBy('AVG(ub.best_score)', 'DESC')
       .limit(limit)
       .getRawMany();
 
@@ -77,8 +92,8 @@ export class UniversitiesService {
       university_name: row.university_name,
       avg_score: row.avg_score ? parseFloat(Number(row.avg_score).toFixed(1)) : 0,
       top_score: row.top_score ? parseFloat(Number(row.top_score).toFixed(1)) : 0,
-      total_students: Number(row.total_students),
-      total_exams: Number(row.total_exams),
+      total_students: Number(row.total_students) || 0,
+      total_exams: Number(row.total_exams) || 0,
     }));
   }
 }
