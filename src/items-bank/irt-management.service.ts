@@ -295,6 +295,7 @@ export class IrtManagementService implements OnModuleInit {
         itemBankId: itemBankId,
         end_time: Not(IsNull()),
       },
+      relations: ['user'],
     });
     const completedCount = completedSessionsData.length;
 
@@ -380,6 +381,9 @@ export class IrtManagementService implements OnModuleInit {
       incorrect_count: number;
       correct_count: number;
       total_time_ms: number;
+      irt_a_discrimination: number | null;
+      irt_b_difficulty: number | null;
+      irt_c_guessing: number | null;
     }>();
 
     for (const bbi of itemBankItems) {
@@ -393,10 +397,23 @@ export class IrtManagementService implements OnModuleInit {
         incorrect_count: 0,
         correct_count: 0,
         total_time_ms: 0,
+        irt_a_discrimination: bbi.item.irt_a_discrimination ?? 0,
+        irt_b_difficulty: bbi.item.irt_b_difficulty ?? 0,
+        irt_c_guessing: bbi.item.irt_c_guessing ?? 0,
       });
     }
 
+    // Map item_id → list of wrong users
+    const wrongUsersMap = new Map<number, { user_id: number; user_name: string }[]>();
+
     for (const session of completedSessionsData) {
+      const userName = (() => {
+        if (!session.user) return `User #${session.userId}`;
+        const f = (session.user.first_name || '').trim();
+        const l = (session.user.last_name || '').trim();
+        return [f, l].filter(Boolean).join(' ') || `User #${session.userId}`;
+      })();
+
       if (Array.isArray(session.responses)) {
         for (const resp of session.responses) {
           const stat = itemStatsMap.get(resp.item_id);
@@ -404,6 +421,12 @@ export class IrtManagementService implements OnModuleInit {
             stat.total_attempts++;
             if (resp.is_correct === false) {
               stat.incorrect_count++;
+              // Collect wrong users (deduplicate per user per item)
+              const list = wrongUsersMap.get(resp.item_id) ?? [];
+              if (!list.find((u) => u.user_id === session.userId)) {
+                list.push({ user_id: session.userId, user_name: userName });
+              }
+              wrongUsersMap.set(resp.item_id, list);
             } else if (resp.is_correct === true) {
               stat.correct_count++;
             }
@@ -432,23 +455,23 @@ export class IrtManagementService implements OnModuleInit {
         correct_count: stat.correct_count,
         error_rate: errorRate,
         avg_time_seconds: avgTimeSeconds,
+        wrong_users: wrongUsersMap.get(stat.item_id) ?? [],
+        
       };
     });
 
     const attemptedItems = calculatedItems.filter((i) => i.total_attempts > 0);
 
-    const mostMissed = [...attemptedItems]
-      .sort((a, b) => {
-        if (b.error_rate !== a.error_rate) {
-          return b.error_rate - a.error_rate;
-        }
-        return b.incorrect_count - a.incorrect_count;
-      })
-      .slice(0, 5);
+    const mostMissed = [...attemptedItems].sort((a, b) => {
+      if (b.error_rate !== a.error_rate) {
+        return b.error_rate - a.error_rate;
+      }
+      return b.incorrect_count - a.incorrect_count;
+    });
 
-    const slowest = [...attemptedItems]
-      .sort((a, b) => b.avg_time_seconds - a.avg_time_seconds)
-      .slice(0, 5);
+    const slowest = [...attemptedItems].sort(
+      (a, b) => b.avg_time_seconds - a.avg_time_seconds,
+    );
 
     return {
       item_bank: {
