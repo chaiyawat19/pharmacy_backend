@@ -364,6 +364,92 @@ export class IrtManagementService implements OnModuleInit {
       status: 'COMPLETED',
     }));
 
+    // ── Item-level Performance Analytics (ข้อที่ตอบผิดบ่อย & ข้อที่ใช้เวลานานที่สุด) ──
+    const itemBankItems = await this.itemBankItemRepo.find({
+      where: { item_bank_id: itemBankId },
+      relations: ['item', 'item.situation'],
+      order: { display_order: 'ASC' },
+    });
+
+    const itemStatsMap = new Map<number, {
+      item_id: number;
+      display_order: number;
+      question_text: string;
+      situation_text: string | null;
+      total_attempts: number;
+      incorrect_count: number;
+      correct_count: number;
+      total_time_ms: number;
+    }>();
+
+    for (const bbi of itemBankItems) {
+      if (!bbi.item) continue;
+      itemStatsMap.set(bbi.item_id, {
+        item_id: bbi.item_id,
+        display_order: bbi.display_order ?? 0,
+        question_text: bbi.item.question_text || '',
+        situation_text: bbi.item.situation?.situation_text || null,
+        total_attempts: 0,
+        incorrect_count: 0,
+        correct_count: 0,
+        total_time_ms: 0,
+      });
+    }
+
+    for (const session of completedSessionsData) {
+      if (Array.isArray(session.responses)) {
+        for (const resp of session.responses) {
+          const stat = itemStatsMap.get(resp.item_id);
+          if (stat) {
+            stat.total_attempts++;
+            if (resp.is_correct === false) {
+              stat.incorrect_count++;
+            } else if (resp.is_correct === true) {
+              stat.correct_count++;
+            }
+            if (typeof resp.response_time_ms === 'number' && resp.response_time_ms > 0) {
+              stat.total_time_ms += resp.response_time_ms;
+            }
+          }
+        }
+      }
+    }
+
+    const calculatedItems = Array.from(itemStatsMap.values()).map((stat) => {
+      const errorRate = stat.total_attempts > 0
+        ? Math.round((stat.incorrect_count / stat.total_attempts) * 1000) / 10
+        : 0;
+      const avgTimeSeconds = stat.total_attempts > 0
+        ? Math.round((stat.total_time_ms / stat.total_attempts / 1000) * 10) / 10
+        : 0;
+      return {
+        item_id: stat.item_id,
+        display_order: stat.display_order,
+        question_text: stat.question_text,
+        situation_text: stat.situation_text,
+        total_attempts: stat.total_attempts,
+        incorrect_count: stat.incorrect_count,
+        correct_count: stat.correct_count,
+        error_rate: errorRate,
+        avg_time_seconds: avgTimeSeconds,
+      };
+    });
+
+    const attemptedItems = calculatedItems.filter((i) => i.total_attempts > 0);
+
+    const mostMissed = [...attemptedItems]
+      .sort((a, b) => {
+        if (b.error_rate !== a.error_rate) {
+          return b.error_rate - a.error_rate;
+        }
+        return b.incorrect_count - a.incorrect_count;
+      })
+      .slice(0, 5);
+
+    const slowest = [...attemptedItems]
+      .sort((a, b) => b.avg_time_seconds - a.avg_time_seconds)
+      .slice(0, 5);
+
     return {
       item_bank: {
         id: bank.item_bank_id,
@@ -389,6 +475,10 @@ export class IrtManagementService implements OnModuleInit {
       },
       charts: { score_distribution: scoreDistribution },
       recent_activity: recentActivity,
+      item_analytics: {
+        most_missed: mostMissed,
+        slowest: slowest,
+      },
     };
   }
 
