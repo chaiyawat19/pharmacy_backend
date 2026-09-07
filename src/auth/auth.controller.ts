@@ -17,6 +17,10 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
+import {
+  AUTH_THROTTLE_LIMIT,
+  THROTTLE_TTL,
+} from '../common/throttle.constants';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { SendOtpDto } from './dto/send-otp.dto';
@@ -29,8 +33,8 @@ export class AuthController {
     private readonly usersService: UsersService,
   ) {}
 
-  /** Login — จำกัด 10 ครั้ง/นาที ป้องกัน brute force */
-  @Throttle({ auth: {} })
+  /** Login — จำกัด 60 ครั้ง/นาที ป้องกัน brute force */
+  @Throttle({ auth: { limit: AUTH_THROTTLE_LIMIT, ttl: THROTTLE_TTL } })
   @Public()
   @UseGuards(LocalAuthGuard)
   @Post('login')
@@ -43,8 +47,8 @@ export class AuthController {
     };
   }
 
-  /** Forgot password — จำกัด 10 ครั้ง/นาที ป้องกัน spam email */
-  @Throttle({ auth: {} })
+  /** Forgot password — จำกัด 60 ครั้ง/นาที ป้องกัน spam email */
+  @Throttle({ auth: { limit: AUTH_THROTTLE_LIMIT, ttl: THROTTLE_TTL } })
   @Public()
   @Post('forgot-password')
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
@@ -104,7 +108,7 @@ export class AuthController {
   }
 
   /** ส่ง OTP ไปยังอีเมล */
-  @Throttle({ auth: {} })
+  @Throttle({ auth: { limit: AUTH_THROTTLE_LIMIT, ttl: THROTTLE_TTL } })
   @Public()
   @Post('send-otp')
   async sendOTP(@Body() sendOtpDto: SendOtpDto) {

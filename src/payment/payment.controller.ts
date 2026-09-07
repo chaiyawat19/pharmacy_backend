@@ -14,6 +14,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import {
+  PAYMENT_THROTTLE_LIMIT,
+  THROTTLE_TTL,
+} from '../common/throttle.constants';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -30,13 +34,13 @@ import { UpdatePaymentSettingsDto } from './dto/update-payment-settings.dto';
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
-  @Throttle({ payment: {} })
+  @Throttle({ payment: { limit: PAYMENT_THROTTLE_LIMIT, ttl: THROTTLE_TTL } })
   @Post('generate-qr')
   async generateQr(@Request() req, @Body() dto: GenerateQrDto) {
     return this.paymentService.generateQr(req.user.userId, dto.method);
   }
 
-  @Throttle({ payment: {} })
+  @Throttle({ payment: { limit: PAYMENT_THROTTLE_LIMIT, ttl: THROTTLE_TTL } })
   @Post('verify-slip')
   @UseInterceptors(
     FileInterceptor('image', {

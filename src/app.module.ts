@@ -12,6 +12,10 @@ import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { RolesGuard } from './common/guards/roles.guard';
+import {
+  THROTTLE_TTL,
+  GLOBAL_THROTTLE_LIMIT,
+} from './common/throttle.constants';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { NotesModule } from './notes/notes.module';
 import { ChatModule } from './chat/chat.module';
@@ -37,21 +41,27 @@ import { PaymentModule } from './payment/payment.module';
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(), // cron — ใช้ส่งอีเมลเตือนก่อน subscription หมดอายุ
     // ── S2.2: Rate Limiting ────────────────────────────────────────────────
+    // สำคัญ: throttler ทุกตัวในอาร์เรย์นี้มีผลกับ *ทุก* endpoint ไม่ใช่เฉพาะ route
+    // ที่ใส่ @Throttle ค่าที่เข้มที่สุดจึงกลายเป็นเพดานของทั้งระบบ
+    // ('payment' ที่เคยตั้ง limit 10 ตรงนี้ ทำให้ทั้ง API ถูกจำกัดเหลือ 10 req/นาที)
+    //
+    // ตัวที่ตั้งใจให้เข้มเฉพาะบาง route จึงต้องตั้ง default ตรงนี้ให้หลวมเท่า global
+    // แล้วไประบุ limit จริงในตัว @Throttle ของ route นั้น ๆ แทน
     ThrottlerModule.forRoot([
       {
         name: 'global',
-        ttl: 60000, // 1 นาที
-        limit: 300, // 300 requests/นาที ต่อ IP (global)
+        ttl: THROTTLE_TTL,
+        limit: GLOBAL_THROTTLE_LIMIT, // เพดานรวมต่อ IP
       },
       {
         name: 'auth',
-        ttl: 60000, // 1 นาที
-        limit: 60, // 60 requests/นาที สำหรับ auth endpoints
+        ttl: THROTTLE_TTL,
+        limit: GLOBAL_THROTTLE_LIMIT, // default หลวม — limit จริงอยู่ใน @Throttle ของ AuthController
       },
       {
         name: 'payment',
-        ttl: 60000, // 1 นาที
-        limit: 10, // 10 requests/นาที กันสแปมอัปโหลดสลิป/generate QR
+        ttl: THROTTLE_TTL,
+        limit: GLOBAL_THROTTLE_LIMIT, // default หลวม — limit จริงอยู่ใน @Throttle ของ PaymentController
       },
     ]),
     TypeOrmModule.forRootAsync({
