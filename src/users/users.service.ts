@@ -12,6 +12,7 @@ import { MoreThan, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import { Subscription } from '../payment/entities/subscription.entity';
+import { PaymentService } from '../payment/payment.service';
 import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -32,6 +33,7 @@ export class UsersService {
     private readonly examSessionRepository: Repository<ExamSession>,
     @InjectRepository(Subscription)
     private readonly subscriptionRepository: Repository<Subscription>,
+    private readonly paymentService: PaymentService,
   ) {}
   async findOneById(user_id: number): Promise<User | null> {
     return this.userRepository.findOne({
@@ -352,15 +354,26 @@ export class UsersService {
     }
 
     if (roleId === null) {
-      // ล้าง override แล้วปล่อยให้ระบบคำนวณใหม่ตอน login ครั้งถัดไป
       await this.userRepository.update({ user_id: targetId }, { manual_role_id: null });
+
+      // คำนวณสิทธิ์ใหม่ทันที ไม่รอ login ครั้งถัดไป — ไม่งั้น role_id ที่ค้างอยู่
+      // จะทำให้หน้าจัดการผู้ใช้แสดงสิทธิ์ที่ไม่ตรงความจริง และปุ่มถอด/ให้สิทธิ์
+      // ที่ขึ้นกับ role_id จะกลายเป็นปุ่มผิดตัวจนกดถอดสิทธิ์ซ้ำไม่ได้
+      const { roleId: effectiveRoleId } = await this.paymentService.getEffectiveRoleId(
+        targetId,
+        target.role_id,
+      );
+
       this.logger.log(
-        `Super Admin ${requesterId} คืนสิทธิ์อัตโนมัติให้ผู้ใช้ ${targetId} (${target.email})`,
+        `Super Admin ${requesterId} คืนสิทธิ์อัตโนมัติให้ผู้ใช้ ${targetId} (${target.email}) → role ${effectiveRoleId}`,
       );
       return {
-        message: `คืนการคำนวณสิทธิ์อัตโนมัติให้ ${target.email} แล้ว`,
+        message:
+          effectiveRoleId === 2
+            ? `คืนการคำนวณอัตโนมัติให้ ${target.email} แล้ว — ยังมีสิทธิ์ที่ชำระเงินไว้ จึงได้สิทธิ์ผู้ดูแลระบบกลับคืน`
+            : `คืนการคำนวณอัตโนมัติให้ ${target.email} แล้ว — ไม่มีสิทธิ์ที่ชำระเงินไว้ จึงเป็นผู้ใช้งานทั่วไป`,
         user_id: targetId,
-        role_id: target.role_id,
+        role_id: effectiveRoleId,
         manual_role_id: null,
       };
     }

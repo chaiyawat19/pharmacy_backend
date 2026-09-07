@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import { Subscription } from '../payment/entities/subscription.entity';
+import { PaymentService } from '../payment/payment.service';
 import {
   ConflictException,
   NotFoundException,
@@ -69,6 +70,7 @@ function makeUser(overrides: Partial<User> = {}): User {
 describe('UsersService', () => {
   let service: UsersService;
   let repo: MockRepo;
+  let paymentService: jest.Mocked<PaymentService>;
 
   beforeEach(async () => {
     repo = createMockRepo();
@@ -79,10 +81,20 @@ describe('UsersService', () => {
         { provide: getRepositoryToken(User), useValue: repo },
         { provide: getRepositoryToken(ExamSession), useValue: createMockRepo() },
         { provide: getRepositoryToken(Subscription), useValue: createMockRepo() },
+        {
+          // ใช้ตอนล้าง manual override เพื่อคำนวณสิทธิ์ใหม่ทันที
+          provide: PaymentService,
+          useValue: {
+            getEffectiveRoleId: jest
+              .fn()
+              .mockResolvedValue({ roleId: 1, expiresAt: null }),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
+    paymentService = module.get(PaymentService);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -319,6 +331,20 @@ describe('UsersService', () => {
       await service.setRole(5, null, 3);
 
       expect(repo.update).toHaveBeenCalledWith({ user_id: 5 }, { manual_role_id: null });
+    });
+
+    it('ควร คำนวณสิทธิ์ใหม่ทันทีหลังล้าง override ไม่รอ login ครั้งถัดไป', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, role_id: 1 }));
+      paymentService.getEffectiveRoleId.mockResolvedValueOnce({
+        roleId: 2,
+        expiresAt: new Date('2027-01-01'),
+      });
+
+      const result = await service.setRole(5, null, 3);
+
+      expect(paymentService.getEffectiveRoleId).toHaveBeenCalledWith(5, 1);
+      // คืน role ที่คำนวณใหม่ ไม่ใช่ค่าเดิมที่ค้างอยู่ใน DB
+      expect(result.role_id).toBe(2);
     });
 
     it('ควร ไม่ให้ตั้งสิทธิ์เป็น Super Admin (3)', async () => {

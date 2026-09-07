@@ -6,11 +6,13 @@ import { User } from './entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import { Subscription } from '../payment/entities/subscription.entity';
 import { AuthModule } from '../auth/auth.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, ExamSession, Subscription]),
     forwardRef(() => AuthModule),
+    PaymentModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],
