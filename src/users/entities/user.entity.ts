@@ -100,4 +100,12 @@ export class User {
    */
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp with time zone', nullable: true })
   deleted_at: Date | null;
+
+  /**
+   * เวลาที่ข้อมูลส่วนตัวถูกล้างถาวร (anonymize) — ชื่อ อีเมล เบอร์ รูป รหัสผ่าน ถูกลบทิ้ง
+   * แถวยังอยู่เพราะมี 9 ตารางอ้าง FK มาแบบ NO ACTION และประวัติสอบ/ใบเสร็จต้องคงไว้
+   * ผู้ใช้ที่ถูกล้างแล้วกู้คืนไม่ได้ เพราะบัญชีไม่เหลืออะไรให้ล็อกอิน
+   */
+  @Column({ name: 'anonymized_at', type: 'timestamp with time zone', nullable: true })
+  anonymized_at: Date | null;
 }

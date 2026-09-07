@@ -83,6 +83,17 @@ export class UsersController {
     return this.usersService.softDeleteUser(id, req.user.userId);
   }
 
+  /**
+   * [Super Admin] ล้างข้อมูลส่วนตัวถาวร — ลบชื่อ อีเมล เบอร์ รูป รหัสผ่านทิ้ง
+   * แต่คงประวัติการสอบ คะแนน และใบเสร็จไว้ ต้องลบผู้ใช้ก่อน และย้อนกลับไม่ได้
+   * ประกาศก่อน @Delete(':id') กันสับสน แม้ path ต่างความลึกจะไม่ชนกันก็ตาม
+   */
+  @Roles(3)
+  @Delete(':id/anonymize')
+  anonymizeUser(@Request() req, @Param('id', ParseIntPipe) id: number) {
+    return this.usersService.anonymizeUser(id, req.user.userId);
+  }
+
   /** [Super Admin] กู้คืนผู้ใช้ที่ถูกลบ */
   @Roles(3)
   @Post(':id/restore')

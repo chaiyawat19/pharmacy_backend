@@ -14,6 +14,7 @@ import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import { Subscription } from '../payment/entities/subscription.entity';
 import { PaymentService } from '../payment/payment.service';
 import * as bcrypt from 'bcrypt';
+import * as fs from 'fs';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 /** role_id ที่ Super Admin ตั้งให้ผู้ใช้คนอื่นได้ — ตั้งเป็น 3 ให้ไม่ได้ */
@@ -324,6 +325,11 @@ export class UsersService {
     if (!target.deleted_at) {
       throw new BadRequestException('ผู้ใช้รายนี้ไม่ได้ถูกลบอยู่แล้ว');
     }
+    if (target.anonymized_at) {
+      throw new BadRequestException(
+        'บัญชีนี้ถูกล้างข้อมูลส่วนตัวถาวรไปแล้ว กู้คืนไม่ได้ (ไม่เหลือข้อมูลให้เข้าสู่ระบบ)',
+      );
+    }
 
     await this.userRepository.restore({ user_id: targetId });
     this.logger.log(`กู้คืนผู้ใช้ ${targetId} (${target.email})`);
@@ -394,6 +400,90 @@ export class UsersService {
       user_id: targetId,
       role_id: roleId,
       manual_role_id: roleId,
+    };
+  }
+
+  /**
+   * ล้างข้อมูลส่วนตัวถาวร — ลบชื่อ อีเมล เบอร์ วันเกิด รหัสผ่าน และรูปโปรไฟล์ทิ้ง
+   * แต่คงแถวและ user_id ไว้ ทำให้ประวัติสอบ คะแนนที่ใช้คำนวณ leaderboard
+   * และใบเสร็จยังอยู่ครบ
+   *
+   * ลบทั้งแถวไม่ได้ เพราะมี 9 ตารางอ้าง FK มาที่ users แบบ ON DELETE NO ACTION
+   * (exam_sessions, subscriptions, notes, notifications, schedules ฯลฯ)
+   * Postgres จะปฏิเสธคำสั่งลบทันที ไม่ใช่ลบแล้วข้อมูลหายเงียบ ๆ
+   *
+   * ต้อง soft delete ก่อน — กันเผลอกดจากหน้ารายชื่อผู้ใช้ปกติ เพราะย้อนกลับไม่ได้
+   */
+  async anonymizeUser(targetId: number, requesterId: number) {
+    if (targetId === requesterId) {
+      throw new BadRequestException('ไม่สามารถล้างข้อมูลบัญชีของตัวเองได้');
+    }
+
+    const target = await this.userRepository.findOne({
+      where: { user_id: targetId },
+      withDeleted: true,
+    });
+
+    if (!target) {
+      throw new NotFoundException(`ไม่พบผู้ใช้งานด้วย ID ${targetId}`);
+    }
+    if (target.role_id === 3) {
+      throw new ForbiddenException('ไม่สามารถล้างข้อมูลบัญชีผู้ดูแลระบบสูงสุดได้');
+    }
+    if (!target.deleted_at) {
+      throw new BadRequestException(
+        'ต้องลบผู้ใช้รายนี้ก่อน จึงจะล้างข้อมูลส่วนตัวถาวรได้',
+      );
+    }
+    if (target.anonymized_at) {
+      throw new BadRequestException('บัญชีนี้ถูกล้างข้อมูลส่วนตัวไปแล้ว');
+    }
+
+    const originalEmail = target.email;
+
+    // ลบไฟล์รูปโปรไฟล์ออกจากดิสก์ด้วย ไม่งั้นรูปยังค้างอยู่แม้ลบ path ในฐานข้อมูลแล้ว
+    if (target.profile_picture?.startsWith('/uploads/')) {
+      const filePath = `.${target.profile_picture}`;
+      try {
+        await fs.promises.unlink(filePath);
+      } catch (err: any) {
+        if (err?.code !== 'ENOENT') {
+          this.logger.warn(
+            `ลบไฟล์รูปโปรไฟล์ ${filePath} ไม่สำเร็จ: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
+
+    await this.userRepository.update(
+      { user_id: targetId },
+      {
+        // first_name กับ email เป็น NOT NULL ใน DB จึงใส่ค่าแทนแทนการเซ็ต null
+        // อีเมลต้องไม่ซ้ำกับใคร และต้องไม่ใช่โดเมนจริง กัน mail service ส่งออกไปโดยไม่ตั้งใจ
+        first_name: 'ผู้ใช้ที่ถูกลบ',
+        last_name: null,
+        email: `deleted-user-${targetId}@anonymized.invalid`,
+        tel: null,
+        bod: null,
+        password: null,
+        profile_picture: null,
+        reset_password_token: null,
+        reset_password_expires: null,
+        // คง university_id ไว้ ไม่ใช่ข้อมูลระบุตัวตน และ leaderboard ระดับมหาวิทยาลัย
+        // ต้องใช้คำนวณ ถ้าล้างทิ้งค่าเฉลี่ยของมหาลัยนั้นจะเปลี่ยนย้อนหลัง
+        role_id: 1,
+        manual_role_id: null,
+        anonymized_at: new Date(),
+      },
+    );
+
+    this.logger.log(
+      `Super Admin ${requesterId} ล้างข้อมูลส่วนตัวของผู้ใช้ ${targetId} (${originalEmail}) ถาวร`,
+    );
+
+    return {
+      message: `ล้างข้อมูลส่วนตัวของ ${originalEmail} ถาวรแล้ว — ประวัติการสอบและใบเสร็จยังอยู่ครบ`,
+      user_id: targetId,
     };
   }
 }

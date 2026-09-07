@@ -376,4 +376,66 @@ describe('UsersService', () => {
       expect(repo.restore).toHaveBeenCalledWith({ user_id: 5 });
     });
   });
+
+  describe('anonymizeUser()', () => {
+    it('ควร ไม่ให้ล้างข้อมูลถ้ายังไม่ได้ลบผู้ใช้ก่อน', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, deleted_at: null }));
+
+      await expect(service.anonymizeUser(5, 3)).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ให้ล้างข้อมูลบัญชีตัวเอง', async () => {
+      await expect(service.anonymizeUser(3, 3)).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ให้ล้างข้อมูลบัญชี Super Admin', async () => {
+      repo.findOne!.mockResolvedValue(
+        makeUser({ user_id: 9, role_id: 3, deleted_at: new Date() }),
+      );
+
+      await expect(service.anonymizeUser(9, 3)).rejects.toThrow(ForbiddenException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ให้ล้างซ้ำถ้าล้างไปแล้ว', async () => {
+      repo.findOne!.mockResolvedValue(
+        makeUser({ user_id: 5, deleted_at: new Date(), anonymized_at: new Date() }),
+      );
+
+      await expect(service.anonymizeUser(5, 3)).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('ควร ล้างข้อมูลระบุตัวตนทิ้ง แต่คง user_id และ university_id ไว้ให้สถิติใช้งานต่อได้', async () => {
+      repo.findOne!.mockResolvedValue(
+        makeUser({ user_id: 5, university_id: 7, deleted_at: new Date() }),
+      );
+
+      await service.anonymizeUser(5, 3);
+
+      const [where, patch] = (repo.update as jest.Mock).mock.calls[0];
+      expect(where).toEqual({ user_id: 5 });
+      expect(patch.email).toBe('deleted-user-5@anonymized.invalid');
+      expect(patch.password).toBeNull();
+      expect(patch.tel).toBeNull();
+      expect(patch.bod).toBeNull();
+      expect(patch.profile_picture).toBeNull();
+      expect(patch.anonymized_at).toBeInstanceOf(Date);
+      // ไม่แตะ university_id — leaderboard ระดับมหาวิทยาลัยต้องใช้คำนวณต่อ
+      expect(patch).not.toHaveProperty('university_id');
+    });
+  });
+
+  describe('restoreUser() หลังล้างข้อมูล', () => {
+    it('ควร กู้คืนบัญชีที่ถูกล้างข้อมูลไปแล้วไม่ได้', async () => {
+      repo.findOne!.mockResolvedValue(
+        makeUser({ user_id: 5, deleted_at: new Date(), anonymized_at: new Date() }),
+      );
+
+      await expect(service.restoreUser(5)).rejects.toThrow(BadRequestException);
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+  });
 });
