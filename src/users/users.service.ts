@@ -54,6 +54,10 @@ export class UsersService {
       .createQueryBuilder('s')
       .select('s.user_id', 'userId')
       .addSelect('COUNT(*)', 'count')
+      .where('(s.session_type = :type OR s.session_type = :lowerType OR s.session_type IS NULL)', {
+        type: 'NORMAL',
+        lowerType: 'normal',
+      })
       .groupBy('s.user_id')
       .getRawMany();
 

@@ -31,6 +31,13 @@ export class UniversitiesController {
     return this.universitiesService.findAll();
   }
 
+  /** จัดอันดับมหาวิทยาลัยตามคะแนนเฉลี่ย — Public */
+  @Public()
+  @Get('leaderboard')
+  getLeaderboard() {
+    return this.universitiesService.getLeaderboard(10);
+  }
+
   /** ดึงมหาวิทยาลัยเฉพาะ ID — ต้อง login */
   @Get(':id')
   findOne(@Param('id') id: string) {
