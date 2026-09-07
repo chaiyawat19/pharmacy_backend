@@ -20,13 +20,19 @@ import { User } from '../users/entities/user.entity';
 import { MailService } from '../mail/mail.service';
 import { buildReceiptPdf, ReceiptData } from './receipt.util';
 
-// ราคาเริ่มต้นตอนสร้างแถวตั้งค่าครั้งแรก — ตอนนี้ตั้งเป็นราคาทดสอบ 20 บาท
-// ราคาจริงคือ 2,720 บาท/ปี (hosting 185x12 + domain 500) เปลี่ยนได้จากหน้า Super Admin
-const DEFAULT_ANNUAL_PRICE = 20;
+// ราคาเริ่มต้นตอนสร้างแถวตั้งค่าครั้งแรกเท่านั้น — หลังจากนั้นแก้ได้จากหน้า Super Admin
+// ค่าจริง 2,720 บาท/ปี (hosting 185x12 + domain 500) ต้องตรงกับ default ของคอลัมน์ใน
+// PaymentSettings entity ไม่งั้นราคาจะต่างกันขึ้นกับว่าแถวถูกสร้างจากโค้ดหรือจาก DB default
+// ตอนทดสอบตั้ง PAYMENT_DEFAULT_ANNUAL_PRICE=20 ใน .env แทนการแก้โค้ด
+const DEFAULT_ANNUAL_PRICE = Number(
+  process.env.PAYMENT_DEFAULT_ANNUAL_PRICE ?? 2720,
+);
 const THUNDER_BASE_URL =
   process.env.THUNDER_API_URL || 'https://api.thunder.in.th/v2';
 const PAYMENT_WINDOW_MS = 5 * 60 * 1000; // เวลาที่ให้ยืนยันสลิปหลังสร้าง QR/คำแนะนำจ่ายเงิน (5 นาที)
 const REMINDER_DAYS_BEFORE = 7; // เตือนล่วงหน้ากี่วันก่อนหมดอายุ
+const SLIP_DIR = './uploads/payment-slips';
+const SLIP_RETENTION_DAYS = 90; // เก็บไฟล์สลิปไว้ตรวจสอบย้อนหลังกี่วันก่อนลบทิ้ง
 
 export type SlipInput =
   | { type: 'image'; filePath: string }
@@ -466,10 +472,16 @@ export class PaymentService {
    * ปรับสิทธิ์ให้ตรงกับสถานะ subscription จริง — เรียกจาก AuthService.login() ก่อนออก JWT ทุกครั้ง
    * ทำงานสองทาง: หมดอายุแล้วลดลงเป็น 1, ยังไม่หมดอายุแต่สิทธิ์หลุดไปแล้วก็ดึงกลับเป็น 2 ให้เอง
    * (ถ้าคืนสิทธิ์ไม่ได้ ผู้ใช้ที่จ่ายเงินแล้วแต่ role หลุดด้วยเหตุใดก็ตามจะติดค้างถาวร ต้องแก้ DB มือ)
+   *
+   * คืน expiresAt กลับไปด้วย เพื่อให้ AuthService ฝังลง JWT — JwtStrategy จะได้ตัดสิทธิ์เองได้
+   * ทันทีที่หมดอายุ โดยไม่ต้องรอ token เดิม (อายุ 1 วัน) หมดหรือรอผู้ใช้ล็อกอินใหม่
    */
-  async getEffectiveRoleId(userId: number, currentRoleId: number): Promise<number> {
+  async getEffectiveRoleId(
+    userId: number,
+    currentRoleId: number,
+  ): Promise<{ roleId: number; expiresAt: Date | null }> {
     if (currentRoleId === 3) {
-      return 3; // Super Admin ไม่ได้มาจากการจ่ายเงิน ไม่มีวันหมดอายุ
+      return { roleId: 3, expiresAt: null }; // Super Admin ไม่ได้มาจากการจ่ายเงิน ไม่มีวันหมดอายุ
     }
 
     const latest = await this.subscriptionRepo.findOne({
@@ -480,7 +492,7 @@ export class PaymentService {
     // ไม่มีประวัติการจ่ายเงินเลย = สิทธิ์ปัจจุบันมาจากทางอื่น (ตั้งเองผ่าน DB ตอน dev/test)
     // ไม่ใช่ของที่ระบบนี้ออกให้ ไม่ต้องไปยุ่ง ปล่อยตามเดิม
     if (!latest) {
-      return currentRoleId;
+      return { roleId: currentRoleId, expiresAt: null };
     }
 
     const stillActive = !!latest.expiresAt && latest.expiresAt.getTime() > Date.now();
@@ -492,7 +504,7 @@ export class PaymentService {
         `ปรับสิทธิ์ user ${userId}: ${currentRoleId} → ${shouldBe} (subscription ${stillActive ? 'ยังไม่หมดอายุ' : 'หมดอายุแล้ว'})`,
       );
     }
-    return shouldBe;
+    return { roleId: shouldBe, expiresAt: stillActive ? latest.expiresAt : null };
   }
 
   async getMySubscription(userId: number) {
@@ -652,6 +664,47 @@ export class PaymentService {
           err as Error,
         );
       }
+    }
+  }
+
+  // ── ล้างไฟล์สลิปเก่า (cron รายวัน 03:00) ─────────────────────────────────
+
+  /**
+   * ไฟล์สลิปที่อัปโหลดมาถูกเก็บไว้บนดิสก์และไม่เคยถูกลบ — สะสมไปเรื่อย ๆ จนเต็ม
+   * เก็บไว้ SLIP_RETENTION_DAYS วันเพื่อตรวจสอบย้อนหลัง แล้วลบทิ้ง
+   * (ตัว path ยังอยู่ในคอลัมน์ slipImageUrl เป็นหลักฐานว่าเคยยืนยันด้วยไฟล์ไหน)
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async cleanupOldSlips() {
+    let entries: string[];
+    try {
+      entries = await fs.promises.readdir(SLIP_DIR);
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        this.logger.error('อ่านโฟลเดอร์สลิปไม่สำเร็จ', err as Error);
+      }
+      return; // ยังไม่เคยมีใครอัปโหลดสลิป โฟลเดอร์ยังไม่ถูกสร้าง
+    }
+
+    const cutoff = Date.now() - SLIP_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    let removed = 0;
+
+    for (const entry of entries) {
+      const filePath = `${SLIP_DIR}/${entry}`;
+      try {
+        const stat = await fs.promises.stat(filePath);
+        if (!stat.isFile() || stat.mtimeMs >= cutoff) continue;
+        await fs.promises.unlink(filePath);
+        removed++;
+      } catch (err) {
+        this.logger.warn(`ลบไฟล์สลิป ${entry} ไม่สำเร็จ: ${(err as Error).message}`);
+      }
+    }
+
+    if (removed > 0) {
+      this.logger.log(
+        `ลบไฟล์สลิปที่เก่ากว่า ${SLIP_RETENTION_DAYS} วันแล้ว ${removed} ไฟล์`,
+      );
     }
   }
 }

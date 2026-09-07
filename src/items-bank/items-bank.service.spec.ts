@@ -17,6 +17,7 @@ import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { NameUniquenessService } from '../common/name-uniqueness.service';
+import { ItemsBankImportService } from './items-bank-import.service';
 
 function createMockRepo() {
   return {
@@ -85,6 +86,10 @@ describe('ItemsBankService', () => {
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('test') },
+        },
+        {
+          provide: ItemsBankImportService,
+          useValue: { importFromExcel: jest.fn(), importFromWord: jest.fn() },
         },
         {
           provide: NameUniquenessService,

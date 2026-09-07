@@ -48,14 +48,17 @@ export class AuthService {
       await this.userService.updateLastLogin(user.id);
     }
 
-    const effectiveRoleId = user.id
+    const { roleId: effectiveRoleId, expiresAt } = user.id
       ? await this.paymentService.getEffectiveRoleId(user.id, user.role_id)
-      : user.role_id;
+      : { roleId: user.role_id, expiresAt: null };
 
     const payload = {
       sub: user.id,
       email: user.email,
       role_id: effectiveRoleId,
+      // วันหมดอายุสิทธิ์ (epoch ms) — JwtStrategy ใช้ตัดสิทธิ์ทันทีที่เลยกำหนด
+      // แม้ token จะยังไม่หมดอายุ ไม่ต้องรอผู้ใช้ล็อกอินใหม่
+      sub_exp: expiresAt ? expiresAt.getTime() : null,
       first_name: user.first_name,
       last_name: user.last_name,
       university: user.university?.name,
@@ -86,15 +89,14 @@ export class AuthService {
       await this.userService.save(user);
     }
 
-    const effectiveRoleId = await this.paymentService.getEffectiveRoleId(
-      user.user_id,
-      user.role_id,
-    );
+    const { roleId: effectiveRoleId, expiresAt } =
+      await this.paymentService.getEffectiveRoleId(user.user_id, user.role_id);
 
     return this.jwtService.sign({
       sub: user.user_id,
       email: user.email,
       role_id: effectiveRoleId,
+      sub_exp: expiresAt ? expiresAt.getTime() : null,
     });
   }
   async forgotPassword(email: string) {

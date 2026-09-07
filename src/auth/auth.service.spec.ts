@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { MailService } from '../mail/mail.service';
+import { PaymentService } from '../payment/payment.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OTP } from './entities/otp.entity';
 import { UnauthorizedException, BadRequestException } from '@nestjs/common';
@@ -43,6 +44,7 @@ describe('AuthService', () => {
   let usersService: jest.Mocked<UsersService>;
   let jwtService: jest.Mocked<JwtService>;
   let mailService: jest.Mocked<MailService>;
+  let paymentService: jest.Mocked<PaymentService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -72,6 +74,18 @@ describe('AuthService', () => {
           },
         },
         {
+          // AuthService เรียก getEffectiveRoleId ก่อนออก JWT ทุกครั้ง เพื่อปรับสิทธิ์
+          // ตามสถานะ subscription — ค่าเริ่มต้นให้ผ่านสิทธิ์เดิมไป (ไม่มีประวัติจ่ายเงิน)
+          provide: PaymentService,
+          useValue: {
+            getEffectiveRoleId: jest
+              .fn()
+              .mockImplementation((_userId: number, currentRoleId: number) =>
+                Promise.resolve({ roleId: currentRoleId, expiresAt: null }),
+              ),
+          },
+        },
+        {
           provide: getRepositoryToken(OTP),
           useValue: {
             findOne: jest.fn(),
@@ -88,6 +102,7 @@ describe('AuthService', () => {
     usersService = module.get(UsersService);
     jwtService = module.get(JwtService);
     mailService = module.get(MailService);
+    paymentService = module.get(PaymentService);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -164,6 +179,31 @@ describe('AuthService', () => {
           email: 'admin@x.com',
           role_id: 2,
         }),
+      );
+    });
+
+    it('ควร ฝังวันหมดอายุสิทธิ์ (sub_exp) ลง JWT เพื่อให้ตัดสิทธิ์ได้ก่อน token หมดอายุ', async () => {
+      const expiresAt = new Date('2027-01-01T00:00:00Z');
+      paymentService.getEffectiveRoleId.mockResolvedValueOnce({
+        roleId: 2,
+        expiresAt,
+      });
+      const user = { id: 7, email: 'paid@x.com', role_id: 1, first_name: 'A', last_name: 'B' };
+
+      const result = await service.login(user);
+
+      expect(result.role_id).toBe(2);
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ role_id: 2, sub_exp: expiresAt.getTime() }),
+      );
+    });
+
+    it('ควร ใส่ sub_exp เป็น null ถ้าไม่มีสิทธิ์รายปีที่ยังไม่หมดอายุ', async () => {
+      const user = { id: 8, email: 'free@x.com', role_id: 1, first_name: 'A', last_name: 'B' };
+      await service.login(user);
+
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub_exp: null }),
       );
     });
   });

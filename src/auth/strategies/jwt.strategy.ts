@@ -23,12 +23,25 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       2: 'admin',
       3: 'super_admin',
     };
-    const roleName = rolesMap[payload.role_id] || 'guest';
+
+    // สิทธิ์ Admin ที่ซื้อรายปีอาจหมดอายุระหว่างที่ token ยังไม่หมด (token อายุ 1 วัน)
+    // ตัดสิทธิ์ลงเป็นผู้ใช้ทั่วไปทันทีจาก sub_exp ที่ฝังมาตอน login โดยไม่ต้อง query DB ทุก request
+    // Super Admin (3) ไม่ได้มาจากการจ่ายเงิน จึงไม่ถูกตัด
+    let roleId: number | null = payload.role_id ?? null;
+    if (
+      roleId === 2 &&
+      typeof payload.sub_exp === 'number' &&
+      payload.sub_exp <= Date.now()
+    ) {
+      roleId = 1;
+    }
+
+    const roleName = (roleId !== null && rolesMap[roleId]) || 'guest';
 
     return {
       userId: payload.sub,
       email: payload.email,
-      role_id: payload.role_id ?? null,
+      role_id: roleId,
       role: roleName,
     };
   }
