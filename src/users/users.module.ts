@@ -4,11 +4,12 @@ import { UsersController } from './users.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
+import { Subscription } from '../payment/entities/subscription.entity';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, ExamSession]),
+    TypeOrmModule.forFeature([User, ExamSession, Subscription]),
     forwardRef(() => AuthModule),
   ],
   controllers: [UsersController],

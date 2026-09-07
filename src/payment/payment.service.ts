@@ -484,6 +484,20 @@ export class PaymentService {
       return { roleId: 3, expiresAt: null }; // Super Admin ไม่ได้มาจากการจ่ายเงิน ไม่มีวันหมดอายุ
     }
 
+    // Super Admin ตั้งสิทธิ์คนนี้ไว้เองด้วยมือ — เคารพค่านั้น ไม่คำนวณจาก subscription
+    // ถ้าไม่เช็คตรงนี้ การถอดสิทธิ์จะถูกย้อนกลับทันทีที่ผู้ใช้ login ใหม่
+    // ตราบใดที่ subscription ยังไม่หมดอายุ
+    const target = await this.userRepo.findOne({ where: { user_id: userId } });
+    if (target?.manual_role_id != null) {
+      if (target.role_id !== target.manual_role_id) {
+        await this.userRepo.update(
+          { user_id: userId },
+          { role_id: target.manual_role_id },
+        );
+      }
+      return { roleId: target.manual_role_id, expiresAt: null };
+    }
+
     const latest = await this.subscriptionRepo.findOne({
       where: { userId, status: 'successful' },
       order: { expiresAt: 'DESC' },

@@ -7,6 +7,7 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
+  DeleteDateColumn,
 } from 'typeorm';
 import { University } from '../../universities/entities/university.entity';
 import { Role } from '../../roles/entities/role.entity';
@@ -48,6 +49,15 @@ export class User {
   @Column({ type: 'integer', default: 1 })
   role_id: number;
 
+  /**
+   * สิทธิ์ที่ Super Admin ตั้งเองด้วยมือ — ทับผลการคำนวณจาก subscription
+   * NULL = ปล่อยให้ PaymentService.getEffectiveRoleId คำนวณเองตามวันหมดอายุ
+   * ถ้าไม่มีคอลัมน์นี้ การถอดสิทธิ์จะไม่ติด เพราะระบบจะดึง role กลับเป็น 2
+   * ให้เองตอน login ถัดไป ตราบใดที่ subscription ยังไม่หมดอายุ
+   */
+  @Column({ name: 'manual_role_id', type: 'integer', nullable: true })
+  manual_role_id: number | null;
+
   @ManyToOne(() => Role)
   @JoinColumn({ name: 'role_id' })
   role: Role;
@@ -82,4 +92,12 @@ export class User {
 
   @OneToMany(() => Bookmark, (bookmark) => bookmark.user)
   bookmarks: Bookmark[];
+
+  /**
+   * soft delete — ลบจริงไม่ได้เพราะมี 11 ตารางอ้าง FK มาที่ users
+   * TypeORM จะกรองแถวที่มีค่าคอลัมน์นี้ออกจาก find/findOne ให้เองโดยอัตโนมัติ
+   * ผลพลอยได้คือผู้ใช้ที่ถูกลบจะ login ไม่ได้ทันที (findByEmail มองไม่เห็น)
+   */
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp with time zone', nullable: true })
+  deleted_at: Date | null;
 }

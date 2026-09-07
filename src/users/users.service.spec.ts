@@ -3,7 +3,13 @@ import { UsersService } from './users.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Subscription } from '../payment/entities/subscription.entity';
+import {
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
 
@@ -17,6 +23,9 @@ type MockRepo = {
   create: jest.Mock;
   save: jest.Mock;
   count: jest.Mock;
+  update: jest.Mock;
+  softDelete: jest.Mock;
+  restore: jest.Mock;
 };
 
 function createMockRepo(): MockRepo {
@@ -26,6 +35,9 @@ function createMockRepo(): MockRepo {
     create: jest.fn(),
     save: jest.fn(),
     count: jest.fn(),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
+    softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
+    restore: jest.fn().mockResolvedValue({ affected: 1 }),
   };
 }
 
@@ -66,6 +78,7 @@ describe('UsersService', () => {
         UsersService,
         { provide: getRepositoryToken(User), useValue: repo },
         { provide: getRepositoryToken(ExamSession), useValue: createMockRepo() },
+        { provide: getRepositoryToken(Subscription), useValue: createMockRepo() },
       ],
     }).compile();
 
@@ -254,6 +267,87 @@ describe('UsersService', () => {
       expect(createArg.password).toBeNull();
       expect(createArg.role_id).toBe(1);
       expect(createArg.provider).toBe('google');
+    });
+  });
+
+  // ============================================================
+  // จัดการผู้ใช้ (Super Admin) — ตรรกะความปลอดภัย
+  // ============================================================
+  describe('softDeleteUser()', () => {
+    it('ควร ไม่ให้ลบบัญชีตัวเอง', async () => {
+      await expect(service.softDeleteUser(3, 3)).rejects.toThrow(BadRequestException);
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ให้ลบบัญชี Super Admin คนอื่น', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 9, role_id: 3 }));
+
+      await expect(service.softDeleteUser(9, 3)).rejects.toThrow(ForbiddenException);
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('ควร throw NotFoundException ถ้าไม่พบผู้ใช้', async () => {
+      repo.findOne!.mockResolvedValue(null);
+
+      await expect(service.softDeleteUser(99, 3)).rejects.toThrow(NotFoundException);
+    });
+
+    it('ควร เรียก softDelete (ไม่ใช่ delete จริง) เมื่อผ่านเงื่อนไขครบ', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, role_id: 2 }));
+
+      await service.softDeleteUser(5, 3);
+
+      expect(repo.softDelete).toHaveBeenCalledWith({ user_id: 5 });
+    });
+  });
+
+  describe('setRole()', () => {
+    it('ควร บันทึก manual_role_id คู่กับ role_id เสมอ ไม่งั้นการถอดสิทธิ์จะถูกย้อนตอน login', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, role_id: 2 }));
+
+      await service.setRole(5, 1, 3);
+
+      expect(repo.update).toHaveBeenCalledWith(
+        { user_id: 5 },
+        { role_id: 1, manual_role_id: 1 },
+      );
+    });
+
+    it('ควร ล้าง manual_role_id เมื่อส่ง null (คืนการคำนวณอัตโนมัติ)', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, role_id: 2 }));
+
+      await service.setRole(5, null, 3);
+
+      expect(repo.update).toHaveBeenCalledWith({ user_id: 5 }, { manual_role_id: null });
+    });
+
+    it('ควร ไม่ให้ตั้งสิทธิ์เป็น Super Admin (3)', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, role_id: 2 }));
+
+      await expect(service.setRole(5, 3, 3)).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ให้เปลี่ยนสิทธิ์ตัวเอง', async () => {
+      await expect(service.setRole(3, 1, 3)).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreUser()', () => {
+    it('ควร throw BadRequestException ถ้าผู้ใช้ไม่ได้ถูกลบอยู่', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, deleted_at: null }));
+
+      await expect(service.restoreUser(5)).rejects.toThrow(BadRequestException);
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+
+    it('ควร กู้คืนได้ถ้าผู้ใช้ถูกลบอยู่', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, deleted_at: new Date() }));
+
+      await service.restoreUser(5);
+
+      expect(repo.restore).toHaveBeenCalledWith({ user_id: 5 });
     });
   });
 });

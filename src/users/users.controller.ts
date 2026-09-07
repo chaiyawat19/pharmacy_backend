@@ -6,6 +6,9 @@ import {
   UseGuards,
   Request,
   Patch,
+  Delete,
+  Param,
+  ParseIntPipe,
   UseInterceptors,
   UploadedFile,
   BadRequestException,
@@ -16,6 +19,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { SetUserRoleDto } from './dto/set-user-role.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -62,6 +66,41 @@ export class UsersController {
       data: user,
     };
   }
+  // ── จัดการผู้ใช้ (Super Admin เท่านั้น) ────────────────────────────────────
+  // NOTE: ประกาศ 'deleted' ไว้ก่อน ':id' ไม่งั้น route param จะกลืนไปเป็น id='deleted'
+
+  /** [Super Admin] รายชื่อผู้ใช้ที่ถูกลบไปแล้ว (ถังขยะ) */
+  @Roles(3)
+  @Get('deleted')
+  findDeleted() {
+    return this.usersService.findDeleted();
+  }
+
+  /** [Super Admin] ลบผู้ใช้แบบ soft delete — กู้คืนได้ ประวัติไม่หาย */
+  @Roles(3)
+  @Delete(':id')
+  removeUser(@Request() req, @Param('id', ParseIntPipe) id: number) {
+    return this.usersService.softDeleteUser(id, req.user.userId);
+  }
+
+  /** [Super Admin] กู้คืนผู้ใช้ที่ถูกลบ */
+  @Roles(3)
+  @Post(':id/restore')
+  restoreUser(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.restoreUser(id);
+  }
+
+  /** [Super Admin] ถอด/ให้สิทธิ์ผู้ดูแลระบบ — role_id เป็น null คือคืนค่าอัตโนมัติ */
+  @Roles(3)
+  @Patch(':id/role')
+  setUserRole(
+    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetUserRoleDto,
+  ) {
+    return this.usersService.setRole(id, dto.role_id ?? null, req.user.userId);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   getProfile(@Request() req) {
@@ -123,5 +162,14 @@ export class UsersController {
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
   }
-}
 
+  /**
+   * [Super Admin] ข้อมูลสรุปของผู้ใช้หนึ่งคน
+   * ประกาศไว้ท้ายสุดเพราะ ':id' จะกลืน route คงที่อย่าง 'profile'/'deleted' ที่อยู่หลังมัน
+   */
+  @Roles(3)
+  @Get(':id')
+  findOneDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.findOneDetail(id);
+  }
+}
