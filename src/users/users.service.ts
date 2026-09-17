@@ -8,13 +8,14 @@ import {
 } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, MoreThan, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import { Subscription } from '../payment/entities/subscription.entity';
 import { PaymentService } from '../payment/payment.service';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
+import * as path from 'path';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 /** role_id ที่ Super Admin ตั้งให้ผู้ใช้คนอื่นได้ — ตั้งเป็น 3 ให้ไม่ได้ */
@@ -35,6 +36,7 @@ export class UsersService {
     @InjectRepository(Subscription)
     private readonly subscriptionRepository: Repository<Subscription>,
     private readonly paymentService: PaymentService,
+    private readonly dataSource: DataSource,
   ) {}
   async findOneById(user_id: number): Promise<User | null> {
     return this.userRepository.findOne({
@@ -202,9 +204,56 @@ export class UsersService {
     }
     delete updateData.password;
 
+    // รูปเดิมที่อัปโหลดไว้ในเครื่องจะไม่ถูกใช้แล้วเมื่อเปลี่ยนรูปใหม่ ลบทิ้งกันไฟล์ค้าง
+    const previousPicture = user.profile_picture;
+
     Object.assign(user, updateData);
     const updatedUser = await this.userRepository.save(user);
+
+    if (
+      updateData.profile_picture !== undefined &&
+      previousPicture &&
+      previousPicture !== updatedUser.profile_picture
+    ) {
+      await this.unlinkUpload(previousPicture);
+    }
     return updatedUser;
+  }
+
+  /** ลบรูปโปรไฟล์ — ไฟล์ที่อัปโหลดไว้จะถูกลบ ส่วนรูปจาก Google เป็น URL ภายนอกจึงแค่ล้างค่า */
+  async removeProfilePicture(user_id: number): Promise<User> {
+    const user = await this.userRepository.findOne({
+      where: { user_id },
+      relations: { university: true, role: true },
+    });
+    if (!user) {
+      throw new NotFoundException(`ไม่พบผู้ใช้งานด้วย ID ${user_id}`);
+    }
+
+    const previousPicture = user.profile_picture;
+    user.profile_picture = null;
+    const updatedUser = await this.userRepository.save(user);
+    await this.unlinkUpload(previousPicture);
+    return updatedUser;
+  }
+
+  /**
+   * ตั้งรหัสผ่านครั้งแรก — ใช้กับบัญชี Google ที่ยังไม่มีรหัสผ่าน
+   * บัญชีที่มีรหัสผ่านแล้วต้องเปลี่ยนผ่านขั้นตอนลืมรหัสผ่าน ไม่ให้ทับตรงนี้ได้
+   */
+  async setInitialPassword(user_id: number, password: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { user_id } });
+    if (!user) {
+      throw new NotFoundException(`ไม่พบผู้ใช้งานด้วย ID ${user_id}`);
+    }
+    if (user.password) {
+      throw new BadRequestException(
+        'บัญชีนี้ตั้งรหัสผ่านไว้แล้ว หากต้องการเปลี่ยนรหัสผ่านกรุณาใช้เมนูลืมรหัสผ่าน',
+      );
+    }
+
+    user.password = await bcrypt.hash(password, 10);
+    await this.userRepository.save(user);
   }
 
   // ── จัดการผู้ใช้ (Super Admin เท่านั้น) ────────────────────────────────────
@@ -484,6 +533,242 @@ export class UsersService {
     return {
       message: `ล้างข้อมูลส่วนตัวของ ${originalEmail} ถาวรแล้ว — ประวัติการสอบและใบเสร็จยังอยู่ครบ`,
       user_id: targetId,
+    };
+  }
+
+  // ── ลบถาวร (hard delete) ──────────────────────────────────────────────────
+
+  /**
+   * ลบไฟล์ใน uploads/ แบบไม่โยน error — ข้อมูลใน DB ลบไปแล้ว ถ้าไฟล์ค้างอยู่
+   * ก็ไม่ควรทำให้ทั้งคำสั่งล้มเหลว แค่บันทึก log ไว้ให้ตามลบทีหลัง
+   */
+  private async unlinkUpload(rawPath: string | null | undefined): Promise<void> {
+    if (!rawPath) return;
+
+    const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+    const resolved = path.resolve(process.cwd(), rawPath.replace(/^[\\/]+/, ''));
+
+    // path พวกนี้มาจากฐานข้อมูล — ถ้าหลุดออกนอก uploads/ (เป็น URL ภายนอก
+    // หรือมี ../ ปนมา) ห้ามแตะ ไม่งั้นคำสั่งลบผู้ใช้จะกลายเป็นช่องลบไฟล์ระบบ
+    if (!resolved.startsWith(uploadsRoot + path.sep)) return;
+
+    try {
+      await fs.promises.unlink(resolved);
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        this.logger.warn(`ลบไฟล์ ${resolved} ไม่สำเร็จ: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /** DELETE ที่คืนจำนวนแถวที่ลบไป — query() คืนมาแค่แถว จึงต้องพ่วง RETURNING */
+  private async deleteRows(
+    manager: EntityManager,
+    sql: string,
+    params: unknown[],
+  ): Promise<number> {
+    const rows: unknown[] = await manager.query(`${sql} RETURNING 1`, params);
+    return rows.length;
+  }
+
+  /**
+   * ลบผู้ใช้ถาวรพร้อมข้อมูลทั้งหมด — ไล่ลบลูกทุกตารางก่อน แล้วค่อยลบแถว users
+   *
+   * ต่างจาก anonymizeUser ตรงที่ไม่เหลืออะไรเลย: ประวัติการสอบ คะแนน ใบเสร็จ
+   * โน้ต ไฟล์แนบ และรูปโปรไฟล์หายหมด ค่าเฉลี่ยรวมและ leaderboard จะเปลี่ยน
+   * ย้อนหลัง — ถ้าต้องคงหลักฐานการเงินหรือสถิติไว้ ให้ใช้ anonymizeUser แทน
+   *
+   * มี 10 ตารางอ้าง FK มาที่ users และเกือบทั้งหมดเป็น ON DELETE NO ACTION
+   * ลบแถว users ตรง ๆ Postgres จะปฏิเสธทันที จึงต้องไล่ลบจากลูกขึ้นมาหาพ่อ
+   * ทั้งชุดอยู่ใน transaction เดียว ถ้าพังกลางทางจะ rollback ไม่เหลือผู้ใช้
+   * ที่ข้อมูลหายไปครึ่งเดียว
+   *
+   * ไฟล์บนดิสก์ลบหลัง commit เท่านั้น เพราะลบไฟล์แล้วย้อนคืนไม่ได้
+   * ต่อให้ transaction rollback ทีหลัง
+   */
+  async hardDeleteUser(targetId: number, requesterId: number, confirmEmail: string) {
+    if (targetId === requesterId) {
+      throw new BadRequestException('ไม่สามารถลบบัญชีของตัวเองถาวรได้');
+    }
+
+    const target = await this.userRepository.findOne({
+      where: { user_id: targetId },
+      withDeleted: true,
+    });
+
+    if (!target) {
+      throw new NotFoundException(`ไม่พบผู้ใช้งานด้วย ID ${targetId}`);
+    }
+    if (target.role_id === 3) {
+      throw new ForbiddenException('ไม่สามารถลบบัญชีผู้ดูแลระบบสูงสุดถาวรได้');
+    }
+    // บังคับให้ลบลงถังขยะก่อน — กันกดพลาดจากหน้ารายชื่อผู้ใช้ปกติ
+    // และเปิดช่องให้ทบทวนอีกรอบก่อนลบจริง เพราะกู้คืนไม่ได้
+    if (!target.deleted_at) {
+      throw new BadRequestException('ต้องลบผู้ใช้รายนี้ลงถังขยะก่อน จึงจะลบถาวรได้');
+    }
+    if (confirmEmail.trim().toLowerCase() !== target.email.toLowerCase()) {
+      throw new BadRequestException(
+        'อีเมลยืนยันไม่ตรงกับผู้ใช้รายนี้ กรุณาตรวจสอบอีกครั้ง',
+      );
+    }
+
+    const originalEmail = target.email;
+
+    const { deleted, files } = await this.dataSource.transaction(async (manager) => {
+      // เก็บ path ไฟล์ไว้ก่อนลบแถว — พอลบแล้วไม่มีทางรู้ว่าต้องตามลบไฟล์ไหน
+      const noteFiles: { storage_path: string }[] = await manager.query(
+        `SELECT nf.storage_path FROM note_files nf
+           JOIN notes n ON n.note_id = nf.note_id
+          WHERE n.user_id = $1`,
+        [targetId],
+      );
+      const slips: { slip_image_url: string | null }[] = await manager.query(
+        `SELECT slip_image_url FROM subscriptions
+          WHERE user_id = $1 AND slip_image_url IS NOT NULL`,
+        [targetId],
+      );
+
+      const pendingFiles: string[] = [];
+      if (target.profile_picture) pendingFiles.push(target.profile_picture);
+      for (const file of noteFiles) {
+        pendingFiles.push(path.join('uploads', file.storage_path));
+      }
+      // slip_image_url เก็บได้ทั้ง path ไฟล์, URL ภายนอก และค่าอย่าง 'payload-provided'
+      // ตัวที่ไม่ได้ชี้เข้า uploads/ จะถูก unlinkUpload กรองทิ้งเองอีกชั้น
+      for (const slip of slips) {
+        if (slip.slip_image_url) pendingFiles.push(slip.slip_image_url);
+      }
+
+      const counts: Record<string, number> = {};
+
+      // แชท — ข้อความอ้าง session จึงต้องลบก่อน session
+      counts.chat_messages = await this.deleteRows(
+        manager,
+        `DELETE FROM chat_messages
+          WHERE chat_session_id IN (SELECT chat_session_id FROM chat_sessions WHERE user_id = $1)`,
+        [targetId],
+      );
+      counts.chat_sessions = await this.deleteRows(
+        manager,
+        `DELETE FROM chat_sessions WHERE user_id = $1`,
+        [targetId],
+      );
+      counts.chat_quotas = await this.deleteRows(
+        manager,
+        `DELETE FROM chat_quotas WHERE user_id = $1`,
+        [targetId],
+      );
+
+      // การสอบ — คำตอบรายข้อและ CAT session อ้าง exam_sessions
+      counts.item_answers = await this.deleteRows(
+        manager,
+        `DELETE FROM item_answers
+          WHERE session_id IN (SELECT session_id FROM exam_sessions WHERE user_id = $1)`,
+        [targetId],
+      );
+      // cat_sessions มีทั้ง user_id ของตัวเองและ FK ไป exam_sessions — เช็คสองทาง
+      // เพราะ user_id ไม่มี FK บังคับ แถวกำพร้าจึงหลุดรอดได้ถ้าเช็คทางเดียว
+      counts.cat_sessions = await this.deleteRows(
+        manager,
+        `DELETE FROM cat_sessions
+          WHERE user_id = $1
+             OR session_id IN (SELECT session_id FROM exam_sessions WHERE user_id = $1)`,
+        [targetId],
+      );
+      counts.exam_sessions = await this.deleteRows(
+        manager,
+        `DELETE FROM exam_sessions WHERE user_id = $1`,
+        [targetId],
+      );
+      counts.user_item_mastery = await this.deleteRows(
+        manager,
+        `DELETE FROM user_item_mastery WHERE user_id = $1`,
+        [targetId],
+      );
+
+      // โน้ตและไฟล์แนบ
+      counts.note_files = await this.deleteRows(
+        manager,
+        `DELETE FROM note_files
+          WHERE note_id IN (SELECT note_id FROM notes WHERE user_id = $1)`,
+        [targetId],
+      );
+      counts.note_tags = await this.deleteRows(
+        manager,
+        `DELETE FROM note_tags
+          WHERE note_id IN (SELECT note_id FROM notes WHERE user_id = $1)`,
+        [targetId],
+      );
+      counts.notes = await this.deleteRows(
+        manager,
+        `DELETE FROM notes WHERE user_id = $1`,
+        [targetId],
+      );
+
+      counts.notifications = await this.deleteRows(
+        manager,
+        `DELETE FROM notifications WHERE user_id = $1`,
+        [targetId],
+      );
+      counts.schedules = await this.deleteRows(
+        manager,
+        `DELETE FROM schedules WHERE user_id = $1`,
+        [targetId],
+      );
+      counts.user_bookmarks = await this.deleteRows(
+        manager,
+        `DELETE FROM user_bookmarks WHERE user_id = $1`,
+        [targetId],
+      );
+      counts.subscriptions = await this.deleteRows(
+        manager,
+        `DELETE FROM subscriptions WHERE user_id = $1`,
+        [targetId],
+      );
+
+      // otp_codes ผูกกับอีเมล ไม่ใช่ user_id จึงไม่มี FK คอยเตือน
+      // ถ้าไม่ลบ รหัส OTP ของอีเมลนี้จะค้างอยู่และถูกใช้สมัครใหม่ได้ทันที
+      counts.otp_codes = await this.deleteRows(
+        manager,
+        `DELETE FROM otp_codes WHERE LOWER(email) = LOWER($1)`,
+        [originalEmail],
+      );
+
+      // เอกสารแชทบอทเป็นข้อมูลกลางที่ผู้ใช้ทุกคนใช้ร่วมกัน — ตัดแค่ความเชื่อมโยง
+      // กับคนอัปโหลด ไม่ลบตัวเอกสาร ไม่งั้นลบแอดมินคนเดียวคลังความรู้หายทั้งระบบ
+      const unlinkedDocs: unknown[] = await manager.query(
+        `UPDATE chatbot_documents SET uploaded_by = NULL WHERE uploaded_by = $1 RETURNING 1`,
+        [targetId],
+      );
+      counts.chatbot_documents_unlinked = unlinkedDocs.length;
+
+      counts.users = await this.deleteRows(
+        manager,
+        `DELETE FROM users WHERE user_id = $1`,
+        [targetId],
+      );
+
+      return { deleted: counts, files: pendingFiles };
+    });
+
+    for (const file of files) {
+      await this.unlinkUpload(file);
+    }
+
+    this.logger.warn(
+      `Super Admin ${requesterId} ลบผู้ใช้ ${targetId} (${originalEmail}) ถาวร — ` +
+        Object.entries(deleted)
+          .filter(([, count]) => count > 0)
+          .map(([table, count]) => `${table}=${count}`)
+          .join(' '),
+    );
+
+    return {
+      message: `ลบ ${originalEmail} และข้อมูลทั้งหมดออกจากระบบถาวรแล้ว`,
+      user_id: targetId,
+      deleted,
+      removed_files: files.length,
     };
   }
 }

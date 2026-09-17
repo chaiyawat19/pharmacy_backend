@@ -71,7 +71,11 @@ export class AuthController {
     if (!user) throw new NotFoundException('ไม่พบผู้ใช้งาน');
 
     const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    return {
+      ...userWithoutPassword,
+      // ไม่ส่งรหัสผ่านออกไป แต่บอกหน้าเว็บว่าตั้งไว้หรือยัง (บัญชี Google จะยังไม่มี)
+      has_password: !!password,
+    };
   }
 
   @UseGuards(JwtAuthGuard)

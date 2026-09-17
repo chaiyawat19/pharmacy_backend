@@ -83,7 +83,14 @@ export class AuthService {
       await this.userService.save(user);
     } else {
       user.last_login_at = new Date();
-      if (profile.profile_picture && user.profile_picture !== profile.profile_picture) {
+      // อัปเดตเฉพาะกรณีที่ยังใช้รูปจาก Google อยู่ (URL ภายนอก) — ถ้าผู้ใช้อัปโหลดรูปเอง
+      // หรือลบรูปทิ้งไปแล้ว ต้องไม่เอารูป Google กลับมาทับทุกครั้งที่ล็อกอิน
+      const usingExternalPicture = user.profile_picture?.startsWith('http') ?? false;
+      if (
+        usingExternalPicture &&
+        profile.profile_picture &&
+        user.profile_picture !== profile.profile_picture
+      ) {
         user.profile_picture = profile.profile_picture;
       }
       await this.userService.save(user);

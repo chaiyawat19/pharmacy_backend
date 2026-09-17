@@ -20,6 +20,8 @@ import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { SetUserRoleDto } from './dto/set-user-role.dto';
+import { HardDeleteUserDto } from './dto/hard-delete-user.dto';
+import { SetPasswordDto } from './dto/set-password.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -92,6 +94,21 @@ export class UsersController {
   @Delete(':id/anonymize')
   anonymizeUser(@Request() req, @Param('id', ParseIntPipe) id: number) {
     return this.usersService.anonymizeUser(id, req.user.userId);
+  }
+
+  /**
+   * [Super Admin] ลบผู้ใช้ถาวรพร้อมข้อมูลทั้งหมด — ประวัติสอบ ใบเสร็จ โน้ต
+   * ไฟล์แนบ และรูปโปรไฟล์หายหมด ไม่เหลือแม้แต่แถวใน users
+   * ต้องลบลงถังขยะก่อน และต้องส่ง confirm_email ให้ตรงกับอีเมลของผู้ใช้
+   */
+  @Roles(3)
+  @Delete(':id/purge')
+  hardDeleteUser(
+    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: HardDeleteUserDto,
+  ) {
+    return this.usersService.hardDeleteUser(id, req.user.userId, dto.confirm_email);
   }
 
   /** [Super Admin] กู้คืนผู้ใช้ที่ถูกลบ */
@@ -172,6 +189,24 @@ export class UsersController {
 
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('profile/picture')
+  async removeProfilePicture(@Request() req) {
+    const updatedUser = await this.usersService.removeProfilePicture(
+      req.user.userId,
+    );
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  /** ตั้งรหัสผ่านครั้งแรกสำหรับบัญชี Google — ใช้คู่กับอีเมลเข้าสู่ระบบแบบปกติได้ */
+  @UseGuards(JwtAuthGuard)
+  @Post('profile/password')
+  async setPassword(@Request() req, @Body() dto: SetPasswordDto) {
+    await this.usersService.setInitialPassword(req.user.userId, dto.password);
+    return { message: 'ตั้งรหัสผ่านเรียบร้อยแล้ว' };
   }
 
   /**
