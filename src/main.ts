@@ -80,17 +80,30 @@ async function bootstrap() {
   );
 
   // ── CORS ──────────────────────────────────────────────────────────────────
+  //
+  // FRONTEND_URL ใส่ได้หลายโดเมนโดยคั่นด้วยคอมมา เช่น
+  //   FRONTEND_URL=https://pharmacyexamth.com,https://www.pharmacyexamth.com
+  // เผื่อกรณีมีทั้งโดเมนจริง โดเมน www และ URL ของ Railway ใช้งานพร้อมกัน
+  const envOrigins = [process.env.FRONTEND_URL, process.env.FRONTEND_URLS]
+    .filter(Boolean)
+    .flatMap((value) => (value as string).split(','))
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+
   const allowedOrigins = [
-    process.env.FRONTEND_URL,
+    ...envOrigins,
+    'https://pharmacyexamth.com',
+    'https://www.pharmacyexamth.com',
     'https://phamacyexam-frontend-fork-production.up.railway.app',
     'http://localhost:3000',
     'http://localhost:8080',
-  ].filter(Boolean) as string[];
+  ].filter((origin, idx, list) => list.indexOf(origin) === idx);
 
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
   });
+  console.log('✅ CORS allowed origins:', allowedOrigins.join(', '));
 
   // ✅ ใช้ CustomIoAdapter แทน IoAdapter ธรรมดา
   app.useWebSocketAdapter(new CustomIoAdapter(app));

@@ -12,6 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
 import { OTP } from './entities/otp.entity';
 import { PaymentService } from '../payment/payment.service';
+import { getFrontendUrl } from '../common/frontend-url';
 
 @Injectable()
 export class AuthService {
@@ -117,7 +118,7 @@ export class AuthService {
     user.reset_password_expires = new Date(Date.now() + 15 * 60 * 1000);
     await this.userService.save(user);
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = getFrontendUrl();
     const resetLink = `${frontendUrl}/reset-password?token=${token}`;
 
     try {

@@ -25,6 +25,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { getFrontendUrl } from '../common/frontend-url';
 
 @Controller('auth')
 export class AuthController {
@@ -99,7 +100,7 @@ export class AuthController {
       throw new Error('Google authentication failed');
     }
     const accessToken = await this.authService.socialLogin(req.user);
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = getFrontendUrl();
     return res.redirect(`${frontendUrl}/auth/callback?token=${accessToken}`);
   }
 

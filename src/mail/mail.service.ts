@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { getFrontendUrl } from '../common/frontend-url';
 
 /** ไฟล์แนบอีเมล เช่น ใบเสร็จ PDF */
 export type MailAttachment = {
@@ -141,7 +142,7 @@ export class MailService {
             month: 'long',
             year: 'numeric',
         });
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const frontendUrl = getFrontendUrl();
         const html = `
           <div style="font-family: sans-serif; padding: 20px;">
             <h2>สวัสดีครับ,</h2>
