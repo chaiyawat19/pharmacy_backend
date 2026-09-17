@@ -105,7 +105,7 @@ export class StudentProgressService {
       builder.andWhere(
         `EXISTS (
           SELECT 1 FROM exam_sessions es
-          WHERE es.user_id = user.user_id
+          WHERE es.user_id = "user"."user_id"
             AND es.end_time IS NOT NULL
             AND es.end_time >= :dateCutoff
         )`,
