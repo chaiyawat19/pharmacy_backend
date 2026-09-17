@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, In } from 'typeorm';
+import { DataSource, Repository, In, IsNull } from 'typeorm';
 import { ExamSession } from './entities/exam-session.entity';
 import { Item } from './entities/items.entity';
 import { ItemBankItem } from './entities/item_bank_items.entity';
@@ -54,7 +54,9 @@ export class ExamService {
         userId,
         itemBankId: item_bank_id,
         session_type: 'NORMAL',
-        end_time: null as any,
+        // ต้องใช้ IsNull() — TypeORM 0.3 จะ "ทิ้ง" เงื่อนไขที่ค่าเป็น null ทิ้งไปเฉยๆ
+        // (invalidWhereValuesBehavior.null = 'ignore') ทำให้เผลอไปเจอ session ที่ส่งไปแล้ว
+        end_time: IsNull(),
       },
       order: { start_time: 'DESC' },
     });

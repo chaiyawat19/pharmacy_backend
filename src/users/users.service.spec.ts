@@ -5,6 +5,7 @@ import { User } from './entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
 import { Subscription } from '../payment/entities/subscription.entity';
 import { PaymentService } from '../payment/payment.service';
+import { DataSource } from 'typeorm';
 import {
   ConflictException,
   NotFoundException,
@@ -71,9 +72,12 @@ describe('UsersService', () => {
   let service: UsersService;
   let repo: MockRepo;
   let paymentService: jest.Mocked<PaymentService>;
+  /** EntityManager จำลองใน transaction — hardDeleteUser ยิง SQL ดิบผ่านตัวนี้ */
+  let manager: { query: jest.Mock };
 
   beforeEach(async () => {
     repo = createMockRepo();
+    manager = { query: jest.fn().mockResolvedValue([]) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -88,6 +92,12 @@ describe('UsersService', () => {
             getEffectiveRoleId: jest
               .fn()
               .mockResolvedValue({ roleId: 1, expiresAt: null }),
+          },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
           },
         },
       ],
@@ -436,6 +446,87 @@ describe('UsersService', () => {
 
       await expect(service.restoreUser(5)).rejects.toThrow(BadRequestException);
       expect(repo.restore).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('hardDeleteUser()', () => {
+    const CONFIRM = 'test@example.com';
+
+    it('ควร ไม่ให้ลบถาวรถ้ายังไม่ได้ลบลงถังขยะก่อน', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, deleted_at: null }));
+
+      await expect(service.hardDeleteUser(5, 3, CONFIRM)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(manager.query).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ให้ลบบัญชีตัวเองถาวร', async () => {
+      await expect(service.hardDeleteUser(3, 3, CONFIRM)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(manager.query).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ให้ลบบัญชี Super Admin ถาวร', async () => {
+      repo.findOne!.mockResolvedValue(
+        makeUser({ user_id: 9, role_id: 3, deleted_at: new Date() }),
+      );
+
+      await expect(service.hardDeleteUser(9, 3, CONFIRM)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(manager.query).not.toHaveBeenCalled();
+    });
+
+    it('ควร ไม่ลบถ้าอีเมลยืนยันไม่ตรง — กันกดผิดคนเพราะย้อนกลับไม่ได้', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, deleted_at: new Date() }));
+
+      await expect(
+        service.hardDeleteUser(5, 3, 'someone-else@example.com'),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.query).not.toHaveBeenCalled();
+    });
+
+    it('ควร ลบแถวลูกทุกตารางก่อนแล้วค่อยลบ users เป็นลำดับสุดท้าย', async () => {
+      repo.findOne!.mockResolvedValue(makeUser({ user_id: 5, deleted_at: new Date() }));
+
+      const result = await service.hardDeleteUser(5, 3, ` ${CONFIRM.toUpperCase()} `);
+
+      const statements = (manager.query as jest.Mock).mock.calls.map(
+        ([sql]: [string]) => sql.replace(/\s+/g, ' ').trim(),
+      );
+      const deletes = statements.filter((sql) => sql.startsWith('DELETE'));
+
+      // ลบแถว users ต้องเป็นคำสั่งลบท้ายสุด ไม่งั้น FK แบบ NO ACTION จะปฏิเสธ
+      expect(deletes[deletes.length - 1]).toContain('DELETE FROM users');
+      for (const table of [
+        'chat_messages',
+        'chat_sessions',
+        'chat_quotas',
+        'item_answers',
+        'cat_sessions',
+        'exam_sessions',
+        'user_item_mastery',
+        'note_files',
+        'note_tags',
+        'notes',
+        'notifications',
+        'schedules',
+        'user_bookmarks',
+        'subscriptions',
+        'otp_codes',
+      ]) {
+        expect(deletes.some((sql) => sql.includes(`DELETE FROM ${table} `))).toBe(true);
+      }
+      // เอกสารแชทบอทเป็นข้อมูลกลาง — ตัดคนอัปโหลดออก ไม่ลบทิ้ง
+      expect(
+        statements.some((sql) =>
+          sql.startsWith('UPDATE chatbot_documents SET uploaded_by = NULL'),
+        ),
+      ).toBe(true);
+      expect(deletes.some((sql) => sql.includes('chatbot_documents'))).toBe(false);
+      expect(result.user_id).toBe(5);
     });
   });
 });
