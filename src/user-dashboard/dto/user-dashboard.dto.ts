@@ -1,3 +1,5 @@
+import { UserProgress } from '../progress.types'
+
 export class UserDashboardDto {
     stats: {
         total_exams: number
@@ -16,6 +18,11 @@ export class UserDashboardDto {
         total_users: number
         percentile: number
         rank_change: number
+        is_ranked: boolean
+        next_rank_score: number | null
+        prev_rank_score: number | null
+        gap_to_next: number | null
+        lead_over_prev: number | null
         score_range: {
             top: number
             user_score: number
@@ -37,4 +44,7 @@ export class UserDashboardDto {
         study_time: string
         resources: number
     }[]
+
+    /** พัฒนาการรายครั้ง ระดับ สตรีค และแบดจ์ — ใช้ในหน้าติดตามความคืบหน้า */
+    progress: UserProgress
 }
