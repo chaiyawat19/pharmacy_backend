@@ -170,6 +170,8 @@ export class ChatbotDocumentsService {
       fileName ? path.join(process.cwd(), 'uploads', 'chatbot_docs', fileName) : null,
       fileName ? path.join('/app', 'uploads', 'chatbot_docs', fileName) : null,
       fileName ? path.join('/app', 'pharmacy_backend', 'uploads', 'chatbot_docs', fileName) : null,
+      fileName ? path.join('/uploads', 'chatbot_docs', fileName) : null,
+      fileName ? path.join('/uploads', fileName) : null,
       fileName && process.env.UPLOAD_DIR ? path.join(process.env.UPLOAD_DIR, 'chatbot_docs', fileName) : null,
       fileName && process.env.UPLOAD_DIR ? path.join(process.env.UPLOAD_DIR, fileName) : null,
     ].filter(Boolean) as string[];
@@ -185,6 +187,10 @@ export class ChatbotDocumentsService {
       }
     }
 
+    this.logger.warn(
+      `File not found for document ${id} (${doc.file_name}). Checked paths:\n` +
+      candidatePaths.map(p => ` - ${p} (exists: ${fs.existsSync(p)})`).join('\n')
+    );
     throw new NotFoundException('ไม่พบไฟล์เอกสารต้นฉบับบนเซิร์ฟเวอร์');
   }
 
@@ -207,6 +213,7 @@ export class ChatbotDocumentsService {
     const savedFileName = `${Date.now()}-${safeBaseName}`;
     const fullPath = path.join(uploadDir, savedFileName);
     fs.writeFileSync(fullPath, file.buffer);
+    this.logger.log(`Saved document to disk: ${fullPath} (UPLOAD_DIR=${process.env.UPLOAD_DIR || 'not set'}, cwd=${process.cwd()})`);
 
     // 1. สร้าง Record ในระบบเพื่อรับ ID อ้างอิง
     const doc = this.chatbotDocumentRepo.create({
