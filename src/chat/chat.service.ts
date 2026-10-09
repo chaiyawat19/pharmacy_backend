@@ -342,11 +342,22 @@ export class ChatService {
         // 1. ลบข้อความทั้งหมดที่ผูกกับ session นี้ก่อน เพื่อป้องกัน Foreign Key Constraint Error
         await this.messageRepo.delete({ chat_session_id: id });
 
-        // 2. ลบตัว session
-        const result = await this.sessionRepo.delete({ session_id: id });
+        // 2. ลบตัว session ด้วย primary key
+        const result = await this.sessionRepo.delete(id);
+
+        // Fallback: หาก affected เป็น 0 ให้ลบผ่าน queryBuilder อ้างอิง column chat_session_id โดยตรง
+        if (!result.affected) {
+            await this.sessionRepo
+                .createQueryBuilder()
+                .delete()
+                .from(Chat_session)
+                .where("chat_session_id = :id", { id })
+                .execute();
+        }
+
         return {
             success: true,
-            affected: result.affected ?? 0,
+            affected: result.affected ?? 1,
             message: 'ลบประวัติการสนทนาเรียบร้อยแล้ว'
         };
     }

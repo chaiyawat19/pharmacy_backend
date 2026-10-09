@@ -303,9 +303,9 @@ export class ChatbotDocumentsService {
           this.logger.log(`Batch ${Math.floor(i / batchSize) + 1}: ${validVectors.length} valid vectors (${validVectors[0]?.values?.length ?? 0} dims each)`);
 
           if (validVectors.length > 0 && this.pineconeIndex) {
-            const ns = this.pineconeIndex.namespace(`doc-${savedDoc.id}`);
-            await ns.upsert({ records: validVectors });
-            this.logger.log(`Upsert successful: Batch ${Math.floor(i / batchSize) + 1} with ${validVectors.length} vectors into namespace doc-${savedDoc.id}`);
+            // บันทึกลง Default Namespace โดยตรง เพื่อให้ n8n Vector Store Tool ค้นหาเจอ
+            await this.pineconeIndex.upsert({ records: validVectors });
+            this.logger.log(`Upsert successful: Batch ${Math.floor(i / batchSize) + 1} with ${validVectors.length} vectors into default namespace (doc-${savedDoc.id})`);
           }
 
           // พักระหว่าง batch เล็กน้อย เพื่อลดโอกาสชน Rate Limit ของ Free tier
@@ -326,16 +326,21 @@ export class ChatbotDocumentsService {
         try { fs.unlinkSync(fullPath); } catch {}
       }
 
-      // Cleanup Pinecone namespace safely (404 is normal if no vectors were upserted)
+      // Cleanup Pinecone default namespace and legacy namespace safely
       if (this.pineconeIndex) {
         try {
-          await this.pineconeIndex.namespace(`doc-${savedDoc.id}`).deleteAll();
+          await this.pineconeIndex.deleteMany({
+            filter: { document_id: { $eq: savedDoc.id } }
+          });
         } catch (cleanupError: any) {
           const cleanMsg = cleanupError?.message || String(cleanupError);
           if (!cleanMsg.includes('404') && !cleanupError?.name?.includes('NotFound')) {
             this.logger.warn(`Pinecone cleanup warning for document ${savedDoc.id}: ${cleanMsg}`);
           }
         }
+        try {
+          await this.pineconeIndex.namespace(`doc-${savedDoc.id}`).deleteAll();
+        } catch {}
       }
       
       await this.chatbotDocumentRepo.delete(savedDoc.id);
@@ -400,14 +405,18 @@ export class ChatbotDocumentsService {
 
     if (this.pineconeIndex) {
       try {
-        await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
-        this.logger.log(`Deleted all vectors in namespace doc-${id}`);
+        // ลบออกจาก Default Namespace ตาม document_id
+        await this.pineconeIndex.deleteMany({
+          filter: { document_id: { $eq: id } }
+        });
+        this.logger.log(`Deleted vectors in default namespace for document ${id}`);
       } catch (error: any) {
-        const msg = error?.message || String(error);
-        if (!msg.includes('404') && !error?.name?.includes('NotFound')) {
-          this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
-        }
+        this.logger.warn(`Error deleting vectors in default namespace for document ${id}: ${error?.message || error}`);
       }
+      try {
+        // ล้างเผื่อกรณีเอกสารเก่าเคยอยู่ใน namespace ย่อย
+        await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
+      } catch {}
     }
 
     await this.chatbotDocumentRepo.delete(id);
@@ -429,12 +438,25 @@ export class ChatbotDocumentsService {
     }
 
     if (this.pineconeIndex) {
+      try {
+        // ลบออกจาก Default Namespace พร้อมกัน
+        await this.pineconeIndex.deleteMany({
+          filter: { document_id: { $in: ids } }
+        });
+        this.logger.log(`Deleted vectors in default namespace for documents [${ids.join(', ')}]`);
+      } catch (error: any) {
+        this.logger.warn(`Error batch deleting vectors from default namespace: ${error?.message || error}`);
+        for (const id of ids) {
+          try {
+            await this.pineconeIndex.deleteMany({ filter: { document_id: { $eq: id } } });
+          } catch {}
+        }
+      }
+      // ล้างเผื่อกรณีเอกสารเก่าเคยอยู่ใน namespace ย่อย
       for (const id of ids) {
         try {
           await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
-        } catch (error) {
-          this.logger.error(`Error deleting Pinecone namespace for document ${id}:`, error);
-        }
+        } catch {}
       }
     }
 
