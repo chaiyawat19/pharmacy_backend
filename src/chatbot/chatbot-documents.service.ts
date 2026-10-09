@@ -114,8 +114,8 @@ export class ChatbotDocumentsService {
         worksheet.eachRow((row) => {
           const values = Array.isArray(row.values)
             ? row.values
-                .filter(v => v !== null && v !== undefined)
-                .map(v => typeof v === 'object' && v && 'text' in (v as any) ? (v as any).text : String(v))
+              .filter(v => v !== null && v !== undefined)
+              .map(v => typeof v === 'object' && v && 'text' in (v as any) ? (v as any).text : String(v))
             : [];
           if (values.length > 0) {
             rowsText.push(values.join(' | '));
@@ -161,8 +161,8 @@ export class ChatbotDocumentsService {
     const fileName = doc.file_url
       ? path.basename(doc.file_url)
       : doc.file_path
-      ? path.basename(doc.file_path)
-      : '';
+        ? path.basename(doc.file_path)
+        : '';
 
     const candidatePaths = [
       doc.file_path,
@@ -223,13 +223,13 @@ export class ChatbotDocumentsService {
       file_path: fullPath,
       uploaded_by: userId,
     });
-    
+
     // บันทึกใส่เบสเพื่อให้ได้ doc.id มาประทับตราตอนยัดลง Pinecone
     const savedDoc = await this.chatbotDocumentRepo.save(doc);
 
     try {
       this.logger.log(`Parsing document: ${savedDoc.file_name} (${ext.toUpperCase()}) (ID: ${savedDoc.id})`);
-      
+
       // 2. แกะข้อความจากไฟล์ตามประเภท
       const rawText = await this.extractTextFromFile(file, ext);
 
@@ -245,13 +245,13 @@ export class ChatbotDocumentsService {
         const embeddingModel = this.genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
         // 4. สร้าง Embedding ด้วย Gemini และบันทึกลง Pinecone ทีละชุด (Batches)
-        const batchSize = 15; 
+        const batchSize = 15;
         for (let i = 0; i < chunks.length; i += batchSize) {
           const chunkBatch = chunks.slice(i, i + batchSize);
-          
+
           const requests = chunkBatch.map(content => ({
-              content: { role: 'user', parts: [{ text: content }] },
-              outputDimensionality: 768
+            content: { role: 'user', parts: [{ text: content }] },
+            outputDimensionality: 3072
           }));
 
           // ส่ง batch พร้อม retry แบบ exponential backoff หากติด rate limit
@@ -320,10 +320,10 @@ export class ChatbotDocumentsService {
 
     } catch (error) {
       this.logger.error(`Error processing document ${savedDoc.id}:`, error);
-      
+
       // Cleanup file if processing fails
       if (fs.existsSync(fullPath)) {
-        try { fs.unlinkSync(fullPath); } catch {}
+        try { fs.unlinkSync(fullPath); } catch { }
       }
 
       // Cleanup Pinecone default namespace and legacy namespace safely
@@ -340,9 +340,9 @@ export class ChatbotDocumentsService {
         }
         try {
           await this.pineconeIndex.namespace(`doc-${savedDoc.id}`).deleteAll();
-        } catch {}
+        } catch { }
       }
-      
+
       await this.chatbotDocumentRepo.delete(savedDoc.id);
 
       const errString = (error instanceof Error ? error.message : String(error));
@@ -400,7 +400,7 @@ export class ChatbotDocumentsService {
     });
 
     if (doc?.file_path && fs.existsSync(doc.file_path)) {
-      try { fs.unlinkSync(doc.file_path); } catch {}
+      try { fs.unlinkSync(doc.file_path); } catch { }
     }
 
     if (this.pineconeIndex) {
@@ -416,7 +416,7 @@ export class ChatbotDocumentsService {
       try {
         // ล้างเผื่อกรณีเอกสารเก่าเคยอยู่ใน namespace ย่อย
         await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
-      } catch {}
+      } catch { }
     }
 
     await this.chatbotDocumentRepo.delete(id);
@@ -433,7 +433,7 @@ export class ChatbotDocumentsService {
 
     for (const doc of docs) {
       if (doc.file_path && fs.existsSync(doc.file_path)) {
-        try { fs.unlinkSync(doc.file_path); } catch {}
+        try { fs.unlinkSync(doc.file_path); } catch { }
       }
     }
 
@@ -449,14 +449,14 @@ export class ChatbotDocumentsService {
         for (const id of ids) {
           try {
             await this.pineconeIndex.deleteMany({ filter: { document_id: { $eq: id } } });
-          } catch {}
+          } catch { }
         }
       }
       // ล้างเผื่อกรณีเอกสารเก่าเคยอยู่ใน namespace ย่อย
       for (const id of ids) {
         try {
           await this.pineconeIndex.namespace(`doc-${id}`).deleteAll();
-        } catch {}
+        } catch { }
       }
     }
 
