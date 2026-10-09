@@ -25,7 +25,7 @@ export class Chat_message {
   @Column({ type: 'integer' })
   chat_session_id: number;
 
-  @ManyToOne(() => Chat_session, (session) => session.session_id)
+  @ManyToOne(() => Chat_session, (session) => session.session_id, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'chat_session_id' })
   chat_session: Chat_session;
 

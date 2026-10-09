@@ -49,7 +49,7 @@ export class ChatController {
 
   @Delete('session/:session_id')
   async deleteSession(
-    @Param('session_id') session_id: number
+    @Param('session_id', ParseIntPipe) session_id: number
   ) {
     return this.chatService.deleteSession(session_id);
   }

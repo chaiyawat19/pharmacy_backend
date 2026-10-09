@@ -326,7 +326,29 @@ export class ChatService {
     }
 
     async deleteSession(session_id: number) {
-        return this.sessionRepo.delete({ session_id });
+        const id = Number(session_id);
+        if (!id || Number.isNaN(id)) {
+            throw new BadRequestException('รหัส Session ไม่ถูกต้อง');
+        }
+
+        // ยกเลิก in-flight controller หากมีคำขอกำลังประมวลผลใน session นี้
+        for (const [key, controller] of this.inFlightControllers.entries()) {
+            if (key.endsWith(`_${id}`)) {
+                controller.abort();
+                this.inFlightControllers.delete(key);
+            }
+        }
+
+        // 1. ลบข้อความทั้งหมดที่ผูกกับ session นี้ก่อน เพื่อป้องกัน Foreign Key Constraint Error
+        await this.messageRepo.delete({ chat_session_id: id });
+
+        // 2. ลบตัว session
+        const result = await this.sessionRepo.delete({ session_id: id });
+        return {
+            success: true,
+            affected: result.affected ?? 0,
+            message: 'ลบประวัติการสนทนาเรียบร้อยแล้ว'
+        };
     }
 
     async getAllSessions() {
