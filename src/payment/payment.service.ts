@@ -21,17 +21,28 @@ import { MailService } from '../mail/mail.service';
 import { buildReceiptPdf, ReceiptData } from './receipt.util';
 
 // ราคาเริ่มต้นตอนสร้างแถวตั้งค่าครั้งแรกเท่านั้น — หลังจากนั้นแก้ได้จากหน้า Super Admin
-// ค่าจริง 2,720 บาท/ปี (hosting 185x12 + domain 500) ต้องตรงกับ default ของคอลัมน์ใน
-// PaymentSettings entity ไม่งั้นราคาจะต่างกันขึ้นกับว่าแถวถูกสร้างจากโค้ดหรือจาก DB default
+// 10,000 บาท/ปี ครอบคลุมต้นทุนจริง (hosting, domain, Gemini, n8n — ดูรายละเอียดในหน้าตั้งค่าระบบชำระเงิน)
+// ต้องตรงกับ default ของคอลัมน์ใน PaymentSettings entity ไม่งั้นราคาจะต่างกันขึ้นกับว่าแถวถูกสร้างจากโค้ดหรือจาก DB default
 // ตอนทดสอบตั้ง PAYMENT_DEFAULT_ANNUAL_PRICE=20 ใน .env แทนการแก้โค้ด
 const DEFAULT_ANNUAL_PRICE = Number(
-  process.env.PAYMENT_DEFAULT_ANNUAL_PRICE ?? 2720,
+  process.env.PAYMENT_DEFAULT_ANNUAL_PRICE ?? 10000,
 );
 const THUNDER_BASE_URL =
   process.env.THUNDER_API_URL || 'https://api.thunder.in.th/v2';
-const PAYMENT_WINDOW_MS = 5 * 60 * 1000; // เวลาที่ให้ยืนยันสลิปหลังสร้าง QR/คำแนะนำจ่ายเงิน (5 นาที)
+// เวลาที่ให้ยืนยันสลิปหลังสร้าง QR/คำแนะนำจ่ายเงิน (15 นาที)
+// เดิม 5 นาที ไม่พอสำหรับเปิดแอปธนาคาร โอน แล้วกลับมาอัปโหลดสลิป
+const PAYMENT_WINDOW_MS = 15 * 60 * 1000;
+// สลิปบางธนาคารบอกเวลาแค่ระดับนาที (ไม่มีวินาที) คนที่โอนภายในนาทีเดียวกับที่สร้าง QR
+// จะได้เวลาในสลิปก่อนเวลาสร้าง QR ไม่กี่วินาที จึงเผื่อไว้ 1 นาทีไม่ให้ถูกปฏิเสธผิด ๆ
+const SLIP_TIME_TOLERANCE_MS = 60 * 1000;
 const REMINDER_DAYS_BEFORE = 7; // เตือนล่วงหน้ากี่วันก่อนหมดอายุ
-const SLIP_DIR = './uploads/payment-slips';
+/**
+ * ที่เก็บไฟล์สลิป — อยู่นอกโฟลเดอร์ uploads เพราะ uploads ถูกเปิดให้ดาวน์โหลดได้ทั้งหมด (main.ts)
+ * สลิปมีชื่อและเลขบัญชีของผู้โอน จึงไม่ควรเข้าถึงได้จาก URL
+ */
+export const SLIP_DIR = process.env.SLIP_DIR || './storage/payment-slips';
+/** ที่เก็บเดิมก่อนย้าย — ยังล้างไฟล์เก่าในนี้ต่อจนกว่าจะหมด */
+const LEGACY_SLIP_DIR = './uploads/payment-slips';
 const SLIP_RETENTION_DAYS = 90; // เก็บไฟล์สลิปไว้ตรวจสอบย้อนหลังกี่วันก่อนลบทิ้ง
 
 export type SlipInput =
@@ -367,7 +378,7 @@ export class PaymentService {
         `จำนวนเงินไม่ตรง (โอนมา ${data.amountInSlip} บาท ต้องการ ${subscription.amount} บาท)`,
       );
     }
-    if (slipDate.getTime() < subscription.qrGeneratedAt.getTime()) {
+    if (slipDate.getTime() < subscription.qrGeneratedAt.getTime() - SLIP_TIME_TOLERANCE_MS) {
       subscription.slipImageUrl = slipReference;
       await this.subscriptionRepo.save(subscription);
       throw new BadRequestException(
@@ -690,21 +701,32 @@ export class PaymentService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupOldSlips() {
-    let entries: string[];
-    try {
-      entries = await fs.promises.readdir(SLIP_DIR);
-    } catch (err: any) {
-      if (err?.code !== 'ENOENT') {
-        this.logger.error('อ่านโฟลเดอร์สลิปไม่สำเร็จ', err as Error);
-      }
-      return; // ยังไม่เคยมีใครอัปโหลดสลิป โฟลเดอร์ยังไม่ถูกสร้าง
-    }
-
     const cutoff = Date.now() - SLIP_RETENTION_DAYS * 24 * 60 * 60 * 1000;
     let removed = 0;
+    for (const dir of [SLIP_DIR, LEGACY_SLIP_DIR]) {
+      removed += await this.removeFilesOlderThan(dir, cutoff);
+    }
+    if (removed > 0) {
+      this.logger.log(
+        `ลบไฟล์สลิปที่เก่ากว่า ${SLIP_RETENTION_DAYS} วันแล้ว ${removed} ไฟล์`,
+      );
+    }
+  }
 
+  private async removeFilesOlderThan(dir: string, cutoff: number): Promise<number> {
+    let entries: string[];
+    try {
+      entries = await fs.promises.readdir(dir);
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        this.logger.error(`อ่านโฟลเดอร์สลิป ${dir} ไม่สำเร็จ`, err as Error);
+      }
+      return 0; // ยังไม่เคยมีใครอัปโหลดสลิป โฟลเดอร์ยังไม่ถูกสร้าง
+    }
+
+    let removed = 0;
     for (const entry of entries) {
-      const filePath = `${SLIP_DIR}/${entry}`;
+      const filePath = `${dir}/${entry}`;
       try {
         const stat = await fs.promises.stat(filePath);
         if (!stat.isFile() || stat.mtimeMs >= cutoff) continue;
@@ -714,11 +736,6 @@ export class PaymentService {
         this.logger.warn(`ลบไฟล์สลิป ${entry} ไม่สำเร็จ: ${(err as Error).message}`);
       }
     }
-
-    if (removed > 0) {
-      this.logger.log(
-        `ลบไฟล์สลิปที่เก่ากว่า ${SLIP_RETENTION_DAYS} วันแล้ว ${removed} ไฟล์`,
-      );
-    }
+    return removed;
   }
 }

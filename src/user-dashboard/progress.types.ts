@@ -14,6 +14,24 @@ export type ProgressTimelineItem = {
   duration_minutes: number | null;
 };
 
+/** ผลสอบ CAT รายครั้ง — CAT ไม่มีคะแนนเต็ม 100 จึงใช้ค่าความสามารถ (θ) แทน */
+export type ProgressCatTimelineItem = {
+  session_id: number;
+  attempt: number;
+  /** ISO string */
+  date: string;
+  /** ค่าความสามารถที่ประเมินได้ (ประมาณ −3 ถึง +3) */
+  theta: number;
+  /** ค่าความคลาดเคลื่อนมาตรฐานของ θ */
+  se: number | null;
+  /** เกณฑ์ผ่านของรอบนั้น (θ) */
+  cut_score: number;
+  passed: boolean | null;
+  num_items: number;
+  /** % ข้อที่ตอบถูก */
+  accuracy: number | null;
+};
+
 export type ProgressImprovement = {
   first_score: number | null;
   last_score: number | null;
@@ -70,6 +88,8 @@ export type ProgressAchievement = {
 
 export type UserProgress = {
   timeline: ProgressTimelineItem[];
+  /** แนวโน้มข้อสอบ CAT แยกจาก timeline ของข้อสอบปกติ (20 ครั้งล่าสุด) */
+  cat_timeline: ProgressCatTimelineItem[];
   improvement: ProgressImprovement;
   radar_compare: ProgressRadarCompare[];
   level: ProgressLevel;

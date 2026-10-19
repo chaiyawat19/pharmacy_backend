@@ -33,7 +33,11 @@ describe('UserDashboardService — progress', () => {
   });
 
   /** สร้าง service พร้อม repo ปลอมที่คืน sessions ตามที่กำหนด */
-  const buildService = (sessions: any[], topicScores: Record<string, any[]> = {}) => {
+  const buildService = (
+    sessions: any[],
+    topicScores: Record<string, any[]> = {},
+    catSessions: any[] = [],
+  ) => {
     const sessionRepo: any = {
       find: jest.fn().mockResolvedValue(sessions),
       createQueryBuilder: jest.fn(() => {
@@ -54,6 +58,7 @@ describe('UserDashboardService — progress', () => {
     };
     const userRepo: any = { count: jest.fn().mockResolvedValue(10) };
     const catRepo: any = {
+      find: jest.fn().mockResolvedValue(catSessions),
       createQueryBuilder: jest.fn(() => ({
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
@@ -71,6 +76,7 @@ describe('UserDashboardService — progress', () => {
     const progress = await getProgress(buildService([]));
 
     expect(progress.timeline).toEqual([]);
+    expect(progress.cat_timeline).toEqual([]);
     expect(progress.improvement.last_score).toBeNull();
     expect(progress.level.name).toBe('Bronze');
     expect(progress.streak.current_days).toBe(0);
@@ -166,5 +172,30 @@ describe('UserDashboardService — progress', () => {
     expect(progress.radar_compare).toEqual([
       { subject: 'Asthma', first: 30, latest: 80 },
     ]);
+  });
+
+  it('แปลงผลสอบ CAT เป็นแนวโน้มค่า θ ตามลำดับเวลา', async () => {
+    const cat = (id: number, theta: number, numItems: number, correct: number, passed: boolean | null) => ({
+      session_id: id,
+      userId: 1,
+      end_time: at(10 - id),
+      final_theta: theta,
+      final_se: 0.312,
+      cut_score: 0,
+      passed,
+      num_items: numItems,
+      num_correct: correct,
+    });
+    const service = buildService([], {}, [
+      cat(1, -0.456, 20, 9, false),
+      cat(2, 0.734, 25, 17, true),
+      { ...cat(3, 0, 0, 0, null), final_theta: null }, // ยังไม่มีผล θ → ข้าม
+    ]);
+
+    const progress = await getProgress(service);
+
+    expect(progress.cat_timeline).toHaveLength(2);
+    expect(progress.cat_timeline[0]).toMatchObject({ attempt: 1, theta: -0.46, se: 0.31, accuracy: 45, passed: false });
+    expect(progress.cat_timeline[1]).toMatchObject({ attempt: 2, theta: 0.73, num_items: 25, accuracy: 68, passed: true });
   });
 });

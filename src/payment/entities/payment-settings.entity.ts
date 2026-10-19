@@ -20,7 +20,7 @@ export class PaymentSettings {
     type: 'decimal',
     precision: 10,
     scale: 2,
-    default: 2720,
+    default: 10000,
     transformer: {
       to: (value: number) => value,
       from: (value: string) => parseFloat(value),

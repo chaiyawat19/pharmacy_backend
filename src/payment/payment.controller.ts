@@ -24,7 +24,7 @@ import { extname } from 'path';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
-import { PaymentService, SlipInput } from './payment.service';
+import { PaymentService, SlipInput, SLIP_DIR } from './payment.service';
 import { VerifySlipDto } from './dto/verify-slip.dto';
 import { GenerateQrDto } from './dto/generate-qr.dto';
 import { UpdatePaymentSettingsDto } from './dto/update-payment-settings.dto';
@@ -45,7 +45,8 @@ export class PaymentController {
   @UseInterceptors(
     FileInterceptor('image', {
       storage: diskStorage({
-        destination: './uploads/payment-slips',
+        // เก็บนอก uploads ที่เปิดสาธารณะ (ดู SLIP_DIR) — multer สร้างโฟลเดอร์ให้เองถ้ายังไม่มี
+        destination: SLIP_DIR,
         filename: (req, file, cb) => {
           const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
           const ext = extname(file.originalname);

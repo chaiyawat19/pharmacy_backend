@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 
 import { User } from '../users/entities/user.entity';
 import { ExamSession } from '../items-bank/entities/exam-session.entity';
@@ -8,6 +8,7 @@ import { CATSession } from '../cat/entities/cat-session.entity';
 import { UserDashboardDto } from './dto/user-dashboard.dto';
 import {
   ProgressAchievement,
+  ProgressCatTimelineItem,
   ProgressImprovement,
   ProgressLevel,
   ProgressRadarCompare,
@@ -100,19 +101,44 @@ export class UserDashboardService {
       };
     });
 
-    const [radarCompare, improvement] = await Promise.all([
+    const [radarCompare, improvement, catTimeline] = await Promise.all([
       this.getRadarCompare(userId, finished),
       Promise.resolve(this.buildImprovement(timeline)),
+      this.getCatTimeline(userId),
     ]);
 
     return {
       timeline: timeline.slice(-20), // เก็บเฉพาะ 20 ครั้งล่าสุดพอสำหรับกราฟ
+      cat_timeline: catTimeline,
       improvement,
       radar_compare: radarCompare,
       level: this.buildLevel(timeline),
       streak: this.buildStreak(finished),
       achievements: this.buildAchievements(finished, timeline),
     };
+  }
+
+  /** ผลสอบ CAT ที่ทำจบแล้ว เรียงจากเก่าไปใหม่ (20 ครั้งล่าสุด) สำหรับกราฟแนวโน้ม */
+  private async getCatTimeline(userId: number): Promise<ProgressCatTimelineItem[]> {
+    const sessions = await this.catSessionRepo.find({
+      where: { userId, end_time: Not(IsNull()) },
+      order: { end_time: 'ASC' },
+    });
+
+    return sessions
+      .filter((s) => s.final_theta !== null && s.final_theta !== undefined)
+      .map((s, idx) => ({
+        session_id: Number(s.session_id),
+        attempt: idx + 1,
+        date: new Date(s.end_time).toISOString(),
+        theta: Math.round(s.final_theta * 100) / 100,
+        se: s.final_se === null || s.final_se === undefined ? null : Math.round(s.final_se * 100) / 100,
+        cut_score: s.cut_score ?? 0,
+        passed: s.passed ?? null,
+        num_items: s.num_items ?? 0,
+        accuracy: s.num_items > 0 ? Math.round((s.num_correct / s.num_items) * 100) : null,
+      }))
+      .slice(-20);
   }
 
   private accuracyOf(session: ExamSession): number | null {
