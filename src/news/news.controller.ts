@@ -31,6 +31,7 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 export class NewsController {
   constructor(private readonly newsService: NewsService) { }
 
+  @Roles(2)
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -69,6 +70,7 @@ export class NewsController {
     return { url: `${backendUrl}/uploads/${file.filename}` };
   }
 
+  @Roles(2)
   @Post()
   @UseGuards(JwtAuthGuard)
   create(@Body() createNewsDto: CreateNewsDto, @Req() req) {

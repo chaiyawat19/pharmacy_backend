@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, BadRequestException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Chat_session } from './entities/chat_session.entity';
@@ -311,6 +311,29 @@ export class ChatService {
     }
 
     // ดึงข้อมูลแชตทั้งหมดภายใน session
+    /** แชตต้องเป็นของผู้ใช้คนนี้ — ไม่ใช่ของตัวเองตอบว่าไม่พบ (ไม่บอกว่ามีอยู่) */
+    async assertSessionOwner(session_id: number, user_id: number) {
+        const id = Number(session_id);
+        if (!id || Number.isNaN(id)) {
+            throw new BadRequestException('รหัส Session ไม่ถูกต้อง');
+        }
+        const session = await this.sessionRepo.findOne({ where: { session_id: id, user_id: Number(user_id) } });
+        if (!session) {
+            throw new NotFoundException('ไม่พบประวัติการสนทนานี้');
+        }
+    }
+
+    /** ข้อความต้องอยู่ในแชตของผู้ใช้คนนี้ */
+    async assertMessageOwner(message_id: number, user_id: number) {
+        const message = await this.messageRepo.findOne({
+            where: { message_id: Number(message_id) },
+            relations: ['chat_session'],
+        });
+        if (!message || Number(message.chat_session?.user_id) !== Number(user_id)) {
+            throw new NotFoundException('ไม่พบข้อความนี้');
+        }
+    }
+
     async getMessages(session_id: number) {
         return this.messageRepo.find({
             where: { chat_session_id: session_id },

@@ -150,7 +150,7 @@ export class NotesController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
-  remove(@Param('id') id: string) {
-    return this.notesService.remove(+id);
+  remove(@Param('id') id: string, @Req() req) {
+    return this.notesService.remove(+id, req.user.userId);
   }
 }

@@ -150,6 +150,8 @@ export class ItemsBankController {
 
 
 
+  /** ผู้เรียนใช้ตอนทำข้อสอบ (คลาสนี้ล็อกไว้ที่ @Roles(2)) */
+  @Roles(1, 2)
   @Get(':id/items')
   getItemBankItems(@Param('id') id: string) {
     return this.itemsBankService.getItemBankItems(+id);

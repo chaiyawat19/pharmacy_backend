@@ -2,7 +2,10 @@ import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/commo
 import { RolesService } from './roles.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { Roles } from '../common/decorators/roles.decorator';
 
+/** แก้ตารางบทบาทได้เฉพาะ Super Admin (ไม่มีหน้าเว็บเรียกใช้) */
+@Roles(3)
 @Controller('roles')
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}

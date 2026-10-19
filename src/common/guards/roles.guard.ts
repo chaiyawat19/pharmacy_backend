@@ -20,18 +20,17 @@ export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const isPublic = this.reflector.get<boolean>(
-      'isPublic',
-      context.getHandler(),
-    );
+    // อ่านทั้งระดับเมธอดและระดับคลาส (ค่าที่เมธอดชนะ) — เดิมอ่านแค่เมธอด
+    // ทำให้ @Roles(2) ที่ติดไว้บนคลาส (items-bank, topics, categories, admin/irt) ไม่มีผลเลย
+    // ผู้เรียนจึงเรียก API ของแอดมินเหล่านั้นได้
+    const targets = [context.getHandler(), context.getClass()];
+
+    const isPublic = this.reflector.getAllAndOverride<boolean>('isPublic', targets);
     if (isPublic) {
       return true;
     }
 
-    const requiredRoles = this.reflector.get<number[]>(
-      'roles',
-      context.getHandler(),
-    );
+    const requiredRoles = this.reflector.getAllAndOverride<number[]>('roles', targets);
 
     if (!requiredRoles) {
       return true;

@@ -83,6 +83,8 @@ export class NotesService {
     userId: number,
     files?: Express.Multer.File[],
   ) {
+    // แก้ได้เฉพาะโน้ตของตัวเอง (ไม่ใช่ของตัวเองจะได้ 404)
+    await this.findOne(id, userId);
     const { title, content, link_url, tagIds } = updateNoteDto;
 
     const deletedFilesRaw = (updateNoteDto as any).deletedFiles;
@@ -142,8 +144,9 @@ export class NotesService {
     return this.findOne(id);
   }
 
-  async remove(id: number) {
-    const note = await this.findOne(id);
+  async remove(id: number, userId: number) {
+    // ลบได้เฉพาะโน้ตของตัวเอง
+    const note = await this.findOne(id, userId);
     if (note.files && note.files.length > 0) {
       for (const file of note.files) {
         try {

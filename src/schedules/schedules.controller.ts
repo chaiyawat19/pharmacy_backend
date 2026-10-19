@@ -19,17 +19,20 @@ import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('schedules')
 export class SchedulesController {
   constructor(private readonly schedulesService: SchedulesService) { }
 
+  @Roles(2)
   @UseGuards(JwtAuthGuard)
   @Delete('bulk/all')
   async removeAll(@Req() req) {
     const userId = req.user.userId;
     return this.schedulesService.remove(userId);
   }
+  @Roles(2)
   @UseGuards(JwtAuthGuard)
   @Patch('bulk/status') // Path สำหรับอัปเดตสถานะทั้งหมด
   async updateAllStatus(@Body('is_public') isPublic: boolean, @Req() req) {
@@ -37,6 +40,7 @@ export class SchedulesController {
     return this.schedulesService.updateAllStatus(userId, isPublic);
   }
 
+  @Roles(2)
   @UseGuards(JwtAuthGuard)
   @Post()
   create(@Body() dto: CreateScheduleDto, @Req() req) {
@@ -51,6 +55,7 @@ export class SchedulesController {
    * อัปโหลดไฟล์ PDF ตารางสอบเพื่อให้ AI สกัดข้อมูล
    * S2.5: รับเฉพาะ PDF, ขนาดสูงสุด 20MB
    */
+  @Roles(2)
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -91,6 +96,7 @@ export class SchedulesController {
     return this.schedulesService.findOne(+id);
   }
 
+  @Roles(2)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -99,6 +105,7 @@ export class SchedulesController {
     return this.schedulesService.update(+id, updateScheduleDto);
   }
 
+  @Roles(2)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.schedulesService.remove(+id);

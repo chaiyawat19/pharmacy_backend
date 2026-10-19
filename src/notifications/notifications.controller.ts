@@ -12,6 +12,7 @@ import {
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dto/notification.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)
@@ -31,6 +32,7 @@ export class NotificationsController {
     }
 
     /** Send notification to specific user (admin only) */
+    @Roles(2)
     @Post('send')
     async create(@Body() dto: CreateNotificationDto) {
         try {
@@ -43,6 +45,7 @@ export class NotificationsController {
 
 
     /** Broadcast to all connected users (admin only) */
+    @Roles(2)
     @Post('broadcast')
     broadcast(@Body() dto: Omit<CreateNotificationDto, 'user_id'>) {
         return this.notificationsService.createAndBroadcast(dto);

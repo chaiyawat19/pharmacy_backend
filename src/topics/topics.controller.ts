@@ -28,6 +28,8 @@ export class TopicsController {
     });
   }
 
+  /** ผู้เรียนใช้เลือกหมวดในหน้า CAT (คลาสนี้ล็อกไว้ที่ @Roles(2)) */
+  @Roles(1, 2)
   @Get()
   findAll() {
     return this.topicsService.findAll();

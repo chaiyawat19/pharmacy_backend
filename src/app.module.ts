@@ -36,6 +36,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
 import { StudentProgressModule } from './student-progress/student-progress.module';
 import { PaymentModule } from './payment/payment.module';
 import { SurveyModule } from './survey/survey.module';
+import { PersonalCalendarModule } from './personal-calendar/personal-calendar.module';
 
 @Module({
   imports: [
@@ -114,6 +115,7 @@ import { SurveyModule } from './survey/survey.module';
     UserDashboardModule,
     PaymentModule,
     SurveyModule,
+    PersonalCalendarModule,
   ],
   controllers: [AppController],
   providers: [
