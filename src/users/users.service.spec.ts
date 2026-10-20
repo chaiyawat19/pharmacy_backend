@@ -501,8 +501,6 @@ describe('UsersService', () => {
       // ลบแถว users ต้องเป็นคำสั่งลบท้ายสุด ไม่งั้น FK แบบ NO ACTION จะปฏิเสธ
       expect(deletes[deletes.length - 1]).toContain('DELETE FROM users');
       for (const table of [
-        'chat_messages',
-        'chat_sessions',
         'chat_quotas',
         'item_answers',
         'cat_sessions',

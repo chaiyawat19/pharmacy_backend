@@ -642,18 +642,7 @@ export class UsersService {
 
       const counts: Record<string, number> = {};
 
-      // แชท — ข้อความอ้าง session จึงต้องลบก่อน session
-      counts.chat_messages = await this.deleteRows(
-        manager,
-        `DELETE FROM chat_messages
-          WHERE chat_session_id IN (SELECT chat_session_id FROM chat_sessions WHERE user_id = $1)`,
-        [targetId],
-      );
-      counts.chat_sessions = await this.deleteRows(
-        manager,
-        `DELETE FROM chat_sessions WHERE user_id = $1`,
-        [targetId],
-      );
+      // แชท — ไม่เก็บประวัติแล้ว คงลบแค่ quota ประจำวัน
       counts.chat_quotas = await this.deleteRows(
         manager,
         `DELETE FROM chat_quotas WHERE user_id = $1`,

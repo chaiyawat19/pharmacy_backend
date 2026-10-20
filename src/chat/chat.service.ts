@@ -1,14 +1,13 @@
-import { HttpException, HttpStatus, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Chat_session } from './entities/chat_session.entity';
 import { Repository } from 'typeorm';
-import { Chat_message } from './entities/chat_message.entity';
 import { Chat_quota } from './entities/chat_quota.entity';
 import { firstValueFrom } from 'rxjs';
 
 export const MAX_DAILY_CAPACITY_POINTS = 100; // 100% capacity
 export const MAX_MESSAGE_LENGTH = 1000; // Max characters per message
+export const MAX_HISTORY_TURNS = 20; // cap ephemeral history sent to n8n
 
 export interface QuotaInfo {
     capacity_percentage: number; // % ใช้งานไปแล้ว (0 - 100)
@@ -22,19 +21,20 @@ export interface QuotaInfo {
     reset_in_seconds: number;
 }
 
+export interface ChatHistoryItem {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
 @Injectable()
 export class ChatService {
     // ── In-memory Concurrent Request Lock ──
     private readonly activeUsers = new Set<number>();
-    // ── In-flight AbortControllers map: key = `${user_id}_${session_id}` ──
-    private readonly inFlightControllers = new Map<string, AbortController>();
+    // ── In-flight AbortControllers map: key = user_id ──
+    private readonly inFlightControllers = new Map<number, AbortController>();
 
     constructor(
         private readonly httpService: HttpService,
-        @InjectRepository(Chat_session)
-        private readonly sessionRepo: Repository<Chat_session>,
-        @InjectRepository(Chat_message)
-        private readonly messageRepo: Repository<Chat_message>,
         @InjectRepository(Chat_quota)
         private readonly quotaRepo: Repository<Chat_quota>
     ) { }
@@ -42,19 +42,16 @@ export class ChatService {
     /**
      * ยกเลิกคำขอส่งข้อความที่กำลังประมวลผลอยู่ (Cancel in-flight request)
      */
-    async cancelRequest(userId: number, sessionId?: number): Promise<{ success: boolean; message: string }> {
+    async cancelRequest(userId: number): Promise<{ success: boolean; message: string }> {
+        const controller = this.inFlightControllers.get(userId);
         let cancelled = false;
 
-        // Cancel specific session or any active request of user
-        for (const [key, controller] of this.inFlightControllers.entries()) {
-            if (key.startsWith(`${userId}_`)) {
-                controller.abort();
-                this.inFlightControllers.delete(key);
-                cancelled = true;
-            }
+        if (controller) {
+            controller.abort();
+            this.inFlightControllers.delete(userId);
+            cancelled = true;
         }
 
-        // Release concurrent user lock
         this.activeUsers.delete(userId);
 
         return {
@@ -104,6 +101,25 @@ export class ChatService {
         if (len <= 250) return 2;     // สั้นทั่วไป (คุยได้ประมาณ 50 ข้อความ/วัน)
         if (len <= 600) return 3;     // ปานกลาง
         return 5;                    // ยาวเต็มที่ (601 - 1000 ตัวอักษร)
+    }
+
+    private normalizeHistory(history?: ChatHistoryItem[]): ChatHistoryItem[] {
+        if (!Array.isArray(history) || history.length === 0) {
+            return [];
+        }
+
+        return history
+            .filter((item) =>
+                item &&
+                (item.role === 'user' || item.role === 'assistant') &&
+                typeof item.content === 'string' &&
+                item.content.trim().length > 0
+            )
+            .map((item) => ({
+                role: item.role,
+                content: item.content.trim().slice(0, MAX_MESSAGE_LENGTH),
+            }))
+            .slice(-MAX_HISTORY_TURNS);
     }
 
     /**
@@ -202,9 +218,14 @@ export class ChatService {
     }
 
     /**
-     * ส่งข้อความไปยัง AI (พร้อม Concurrent Lock, Message Length Cap และ Dynamic Quota)
+     * ส่งข้อความไปยัง AI แบบไม่เก็บประวัติ (stateless)
+     * ประวัติ multi-turn ส่งมาจาก frontend เป็น history ชั่วคราวเท่านั้น
      */
-    async sendMessageToN8N(user_id: number, session_id: number, message: string): Promise<any> {
+    async sendMessageToN8N(
+        user_id: number,
+        message: string,
+        history?: ChatHistoryItem[],
+    ): Promise<{ reply: string; cancelled?: boolean; quota: QuotaInfo }> {
         // 1. ตรวจสอบ Message Length Cap
         if (!message || message.trim().length === 0) {
             throw new BadRequestException('กรุณาระบุข้อความ');
@@ -226,35 +247,26 @@ export class ChatService {
         // 3. ล็อค Concurrent Lock
         this.activeUsers.add(user_id);
         const controller = new AbortController();
-        const inFlightKey = `${user_id}_${session_id || 'new'}`;
-        this.inFlightControllers.set(inFlightKey, controller);
+        this.inFlightControllers.set(user_id, controller);
 
         try {
             // 4. ตรวจสอบและหัก Dynamic Quota
             const quotaInfo = await this.checkAndConsumeQuota(user_id, message);
+            const normalizedHistory = this.normalizeHistory(history);
 
-            if (!session_id || session_id.toString() === 'null' || Number.isNaN(Number(session_id))) {
-                const newSession = await this.sessionRepo.save({
-                    user_id: user_id,
-                    title: message.slice(0, 50)
-                });
-                session_id = newSession.session_id;
-            }
-
-            const savedUserMessage = await this.messageRepo.save({
-                chat_session_id: session_id,
-                message_text: message,
-                sender_type: 'USER'
-            });
-
-            // If cancelled before reaching N8N
             if (controller.signal.aborted) {
-                return { user: savedUserMessage, cancelled: true };
+                return { reply: '', cancelled: true, quota: quotaInfo };
             }
 
+            // ไม่ส่ง session_id — ให้ n8n ใช้ history จาก request เป็น context เท่านั้น
+            // ไม่สะสม conversation memory ฝั่ง n8n ตาม session
             const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
             let botReply = '';
-            const payload = { user_id, session_id, message };
+            const payload = {
+                user_id,
+                message,
+                history: normalizedHistory,
+            };
 
             try {
                 const response = await firstValueFrom(
@@ -275,7 +287,7 @@ export class ChatService {
                 if (controller.signal.aborted || error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') {
                     console.log(`[ChatService] N8N request was cancelled by user ${user_id}`);
                     return {
-                        user: savedUserMessage,
+                        reply: '',
                         cancelled: true,
                         quota: quotaInfo
                     };
@@ -283,184 +295,21 @@ export class ChatService {
                 botReply = this.handleN8NError(error);
             }
 
-            // Check again if cancelled before saving
             if (controller.signal.aborted) {
                 return {
-                    user: savedUserMessage,
+                    reply: '',
                     cancelled: true,
                     quota: quotaInfo
                 };
             }
 
-            const savedBotMessage = await this.messageRepo.save({
-                chat_session_id: session_id,
-                message_text: botReply,
-                sender_type: 'BOT'
-            });
-
             return {
-                user: savedUserMessage,
-                bot: savedBotMessage,
-                quota: quotaInfo
-            };
-        } finally {
-            // ปลดล็อค Concurrent Lock & cleanup controller
-            this.activeUsers.delete(user_id);
-            this.inFlightControllers.delete(inFlightKey);
-        }
-    }
-
-    // ดึงข้อมูลแชตทั้งหมดภายใน session
-    /** แชตต้องเป็นของผู้ใช้คนนี้ — ไม่ใช่ของตัวเองตอบว่าไม่พบ (ไม่บอกว่ามีอยู่) */
-    async assertSessionOwner(session_id: number, user_id: number) {
-        const id = Number(session_id);
-        if (!id || Number.isNaN(id)) {
-            throw new BadRequestException('รหัส Session ไม่ถูกต้อง');
-        }
-        const session = await this.sessionRepo.findOne({ where: { session_id: id, user_id: Number(user_id) } });
-        if (!session) {
-            throw new NotFoundException('ไม่พบประวัติการสนทนานี้');
-        }
-    }
-
-    /** ข้อความต้องอยู่ในแชตของผู้ใช้คนนี้ */
-    async assertMessageOwner(message_id: number, user_id: number) {
-        const message = await this.messageRepo.findOne({
-            where: { message_id: Number(message_id) },
-            relations: ['chat_session'],
-        });
-        if (!message || Number(message.chat_session?.user_id) !== Number(user_id)) {
-            throw new NotFoundException('ไม่พบข้อความนี้');
-        }
-    }
-
-    async getMessages(session_id: number) {
-        return this.messageRepo.find({
-            where: { chat_session_id: session_id },
-            order: { sent_at: "DESC" }
-        });
-    }
-
-    async getSession(user_id: number) {
-        return this.sessionRepo.findAndCount({
-            where: { user_id },
-            order: { created_at: "DESC" }
-        });
-    }
-
-    async deleteSession(session_id: number) {
-        const id = Number(session_id);
-        if (!id || Number.isNaN(id)) {
-            throw new BadRequestException('รหัส Session ไม่ถูกต้อง');
-        }
-
-        // ยกเลิก in-flight controller หากมีคำขอกำลังประมวลผลใน session นี้
-        for (const [key, controller] of this.inFlightControllers.entries()) {
-            if (key.endsWith(`_${id}`)) {
-                controller.abort();
-                this.inFlightControllers.delete(key);
-            }
-        }
-
-        // 1. ลบข้อความทั้งหมดที่ผูกกับ session นี้ก่อน เพื่อป้องกัน Foreign Key Constraint Error
-        await this.messageRepo.delete({ chat_session_id: id });
-
-        // 2. ลบตัว session ด้วย primary key
-        const result = await this.sessionRepo.delete(id);
-
-        // Fallback: หาก affected เป็น 0 ให้ลบผ่าน queryBuilder อ้างอิง column chat_session_id โดยตรง
-        if (!result.affected) {
-            await this.sessionRepo
-                .createQueryBuilder()
-                .delete()
-                .from(Chat_session)
-                .where("chat_session_id = :id", { id })
-                .execute();
-        }
-
-        return {
-            success: true,
-            affected: result.affected ?? 1,
-            message: 'ลบประวัติการสนทนาเรียบร้อยแล้ว'
-        };
-    }
-
-    async getAllSessions() {
-        return this.sessionRepo.find({
-            order: { created_at: "DESC" },
-            relations: ['user']
-        });
-    }
-
-    async editMessage(message_id: number, message_text: string) {
-        if (!message_text || message_text.trim().length === 0) {
-            throw new BadRequestException('กรุณาระบุข้อความ');
-        }
-
-        if (message_text.length > MAX_MESSAGE_LENGTH) {
-            throw new BadRequestException(`ข้อความมีความยาวเกินกำหนด (สูงสุด ${MAX_MESSAGE_LENGTH} ตัวอักษร)`);
-        }
-
-        const existingMessage = await this.messageRepo.findOne({
-            where: { message_id },
-            relations: ['chat_session']
-        });
-
-        if (!existingMessage) {
-            throw new HttpException('Message not found', HttpStatus.NOT_FOUND);
-        }
-
-        const user_id = existingMessage.chat_session.user_id;
-
-        // Concurrent Request Lock
-        if (this.activeUsers.has(user_id)) {
-            throw new HttpException({
-                statusCode: HttpStatus.TOO_MANY_REQUESTS,
-                error: 'CONCURRENT_REQUEST_LIMIT',
-                message: 'กำลังประมวลผลข้อความก่อนหน้า กรุณารอสักครู่'
-            }, HttpStatus.TOO_MANY_REQUESTS);
-        }
-
-        this.activeUsers.add(user_id);
-
-        try {
-            // Check & consume quota
-            const quotaInfo = await this.checkAndConsumeQuota(user_id, message_text);
-
-            existingMessage.message_text = message_text;
-            const updatedUserMessage = await this.messageRepo.save(existingMessage);
-
-            const session_id = existingMessage.chat_session_id;
-            const n8nUrl = 'https://cpkku.app.n8n.cloud/webhook/7c8ec1f6-d16c-4c40-8d0d-4e6e4b0186c1';
-            let botReply = '';
-            const payload = { user_id, session_id, message: message_text };
-
-            try {
-                const response = await firstValueFrom(this.httpService.post(n8nUrl, payload));
-                const data = response.data;
-
-                if (data?.status === 'error') {
-                    botReply = this.formatN8NErrorMessage(data);
-                } else {
-                    botReply = this.cleanBotReply(data?.reply ?? '');
-                }
-            } catch (error) {
-                botReply = this.handleN8NError(error);
-            }
-
-            const savedBotMessage = await this.messageRepo.save({
-                chat_session_id: session_id,
-                message_text: botReply,
-                sender_type: 'BOT'
-            });
-
-            return {
-                user: updatedUserMessage,
-                bot: savedBotMessage,
+                reply: botReply,
                 quota: quotaInfo
             };
         } finally {
             this.activeUsers.delete(user_id);
+            this.inFlightControllers.delete(user_id);
         }
     }
 
