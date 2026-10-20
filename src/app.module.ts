@@ -37,6 +37,8 @@ import { StudentProgressModule } from './student-progress/student-progress.modul
 import { PaymentModule } from './payment/payment.module';
 import { SurveyModule } from './survey/survey.module';
 import { PersonalCalendarModule } from './personal-calendar/personal-calendar.module';
+import { ItemReportsModule } from './item-reports/item-reports.module';
+import { DailyReviewModule } from './daily-review/daily-review.module';
 
 @Module({
   imports: [
@@ -116,6 +118,8 @@ import { PersonalCalendarModule } from './personal-calendar/personal-calendar.mo
     PaymentModule,
     SurveyModule,
     PersonalCalendarModule,
+    ItemReportsModule,
+    DailyReviewModule,
   ],
   controllers: [AppController],
   providers: [

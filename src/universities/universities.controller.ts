@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  Request,
 } from '@nestjs/common';
 import { UniversitiesService } from './universities.service';
 import { CreateUniversityDto } from './dto/create-university.dto';
@@ -31,11 +32,10 @@ export class UniversitiesController {
     return this.universitiesService.findAll();
   }
 
-  /** จัดอันดับมหาวิทยาลัยตามคะแนนเฉลี่ย — Public */
-  @Public()
+  /** จัดอันดับมหาวิทยาลัยตามคะแนนเฉลี่ย — ต้อง login (เปิดชื่อเฉพาะมหาวิทยาลัยของตัวเอง) */
   @Get('leaderboard')
-  getLeaderboard() {
-    return this.universitiesService.getLeaderboard(10);
+  getLeaderboard(@Request() req) {
+    return this.universitiesService.getLeaderboard(req.user.userId, 10);
   }
 
   /** ดึงมหาวิทยาลัยเฉพาะ ID — ต้อง login */

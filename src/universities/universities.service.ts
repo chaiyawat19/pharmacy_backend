@@ -41,7 +41,12 @@ export class UniversitiesService {
     return `This action removes a #${id} university`;
   }
 
-  async getLeaderboard(limit = 10) {
+  /**
+   * จัดอันดับมหาวิทยาลัย — ไม่เปิดเผยชื่อมหาวิทยาลัยใดเลย ส่งแค่อันดับ คะแนน และธงว่าเป็นของผู้ขอหรือไม่
+   * (ไม่ส่ง university_id ด้วย เพราะ GET /universities เป็น public จับคู่กลับเป็นชื่อได้)
+   * ถ้ามหาวิทยาลัยของผู้ขออยู่นอก top N จะต่อท้ายให้เห็นอันดับของตัวเอง
+   */
+  async getLeaderboard(userId: number, limit = 10) {
     // 1. Subquery: ดึงคะแนนครั้งที่ดีที่สุด (MAX) และจำนวนครั้งที่สอบของแต่ละ user_id
     const userBestSubquery = this.examSessionRepository
       .createQueryBuilder('es')
@@ -64,7 +69,6 @@ export class UniversitiesService {
     // 2. Main Query: รวมคะแนนเฉลี่ยระดับมหาวิทยาลัยจาก Best Score ของนักศึกษาแต่ละคน
     const rows: Array<{
       university_id: string;
-      university_name: string;
       avg_score: string;
       top_score: string;
       total_students: string;
@@ -72,7 +76,6 @@ export class UniversitiesService {
     }> = await this.examSessionRepository.manager
       .createQueryBuilder()
       .select('univ.university_id', 'university_id')
-      .addSelect('univ.name', 'university_name')
       .addSelect('AVG(ub.best_score)', 'avg_score')
       .addSelect('MAX(ub.best_score)', 'top_score')
       .addSelect('COUNT(ub.user_id)', 'total_students')
@@ -81,20 +84,32 @@ export class UniversitiesService {
       .setParameters(userBestSubquery.getParameters())
       .innerJoin('universities', 'univ', 'univ.university_id = ub.university_id')
       .groupBy('univ.university_id')
-      .addGroupBy('univ.name')
       .orderBy('AVG(ub.best_score)', 'DESC')
-      .limit(limit)
       .getRawMany();
 
-    return rows.map((row, index) => ({
-      rank: index + 1,
-      university_id: Number(row.university_id),
-      university_name: row.university_name,
-      avg_score: row.avg_score ? parseFloat(Number(row.avg_score).toFixed(1)) : 0,
-      top_score: row.top_score ? parseFloat(Number(row.top_score).toFixed(1)) : 0,
-      total_students: Number(row.total_students) || 0,
-      total_exams: Number(row.total_exams) || 0,
-    }));
+    const me = await this.userRepository.findOne({
+      where: { user_id: userId },
+      select: { user_id: true, university_id: true },
+    });
+    const myUniversityId = me?.university_id ?? null;
+
+    const ranked = rows.map((row, index) => {
+      const isMine =
+        myUniversityId !== null && Number(row.university_id) === Number(myUniversityId);
+      return {
+        rank: index + 1,
+        is_mine: isMine,
+        avg_score: row.avg_score ? parseFloat(Number(row.avg_score).toFixed(1)) : 0,
+        top_score: row.top_score ? parseFloat(Number(row.top_score).toFixed(1)) : 0,
+        total_students: Number(row.total_students) || 0,
+        total_exams: Number(row.total_exams) || 0,
+      };
+    });
+
+    const top = ranked.slice(0, limit);
+    const mine = ranked.find((r) => r.is_mine);
+    if (mine && mine.rank > limit) top.push(mine);
+    return top;
   }
 }
 
