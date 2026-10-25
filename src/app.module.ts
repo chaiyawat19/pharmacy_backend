@@ -35,7 +35,6 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { StudentProgressModule } from './student-progress/student-progress.module';
 import { PaymentModule } from './payment/payment.module';
-import { SurveyModule } from './survey/survey.module';
 import { PersonalCalendarModule } from './personal-calendar/personal-calendar.module';
 import { ItemReportsModule } from './item-reports/item-reports.module';
 import { DailyReviewModule } from './daily-review/daily-review.module';
@@ -116,7 +115,6 @@ import { DailyReviewModule } from './daily-review/daily-review.module';
     StudentProgressModule,
     UserDashboardModule,
     PaymentModule,
-    SurveyModule,
     PersonalCalendarModule,
     ItemReportsModule,
     DailyReviewModule,
