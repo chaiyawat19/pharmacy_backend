@@ -194,6 +194,12 @@ export class SchedulesService {
     }
 
     const end = createScheduleDto.endDate ? new Date(createScheduleDto.endDate) : start;
+    if (isNaN(end.getTime())) {
+      throw new BadRequestException(`วันที่สิ้นสุดไม่ถูกต้อง: ${createScheduleDto.endDate}`);
+    }
+    if (end < start) {
+      throw new BadRequestException('วันสิ้นสุดต้องไม่อยู่ก่อนวันเริ่มต้น');
+    }
 
     // 2. จัดการกลุ่มหลักสูตร (ถ้าส่งแยกมา ให้รวมเป็นก้อนเดียวตามกฎ)
     let typeEvent = Array.isArray(createScheduleDto.type_event)
@@ -289,6 +295,13 @@ export class SchedulesService {
       const d = new Date(dto.endDate);
       if (!isNaN(d.getTime())) updateData.end_time = d;
       delete updateData.endDate;
+    }
+
+    // ช่วงวันที่หลังแก้ไข (ใช้ค่าเดิมกับฝั่งที่ไม่ได้ส่งมา) — วันสิ้นสุดต้องไม่อยู่ก่อนวันเริ่มต้น
+    const nextStart: Date = updateData.start_time ?? existing.start_time;
+    const nextEnd: Date = updateData.end_time ?? existing.end_time;
+    if (nextStart && nextEnd && new Date(nextEnd) < new Date(nextStart)) {
+      throw new BadRequestException('วันสิ้นสุดต้องไม่อยู่ก่อนวันเริ่มต้น');
     }
 
     // จัดการกลุ่มหลักสูตรกรณีมีการแก้ไข type_event

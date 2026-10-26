@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsArray, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray, IsNotEmpty, IsUrl, ValidateIf } from 'class-validator';
 
 export class CreateNewsDto {
   @IsString()
@@ -21,8 +21,9 @@ export class CreateNewsDto {
   @IsOptional()
   cover_image_url?: string;
 
-  @IsString()
-  @IsOptional()
+  // ลิงก์แหล่งข่าวต้องเป็น URL ที่ขึ้นต้นด้วย http/https (ค่าว่างถือว่าไม่ใส่ลิงก์)
+  @ValidateIf((o) => o.source_url !== undefined && o.source_url !== null && o.source_url !== '')
+  @IsUrl({ require_protocol: true, protocols: ['http', 'https'] }, { message: 'ลิงก์แหล่งข่าวต้องเป็น URL ที่ขึ้นต้นด้วย http:// หรือ https://' })
   source_url?: string;
 
   @IsString()
