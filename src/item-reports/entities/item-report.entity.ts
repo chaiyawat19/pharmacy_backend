@@ -58,6 +58,14 @@ export class ItemReport {
   @Column({ name: 'resolved_at', type: 'timestamp with time zone', nullable: true })
   resolvedAt: Date | null;
 
+  /** เวลาที่แอดมินแก้ข้อนี้ในคลังข้อสอบ หลังจากมีรายงานนี้แล้ว (ยังไม่ปิดรายงานก็ได้) */
+  @Column({
+    name: 'item_edited_at',
+    type: 'timestamp with time zone',
+    nullable: true,
+  })
+  itemEditedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp with time zone' })
   createdAt: Date;
 

@@ -12,6 +12,7 @@ import {
 import { ItemReportsService } from './item-reports.service';
 import {
   CreateItemReportDto,
+  ResolveItemReportsDto,
   UpdateItemReportDto,
 } from './dto/item-report.dto';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -31,6 +32,31 @@ export class ItemReportsController {
   @Post()
   create(@Request() req, @Body() dto: CreateItemReportDto) {
     return this.service.create(req.user.userId, dto);
+  }
+
+  /** จำนวนรายงานที่รอตรวจ — ใช้แสดงตัวเลขแจ้งเตือนหลังเมนูของแอดมิน */
+  @Roles(2)
+  @Get('open-count')
+  openCount() {
+    return this.service.countOpen();
+  }
+
+  /** จำนวนรายงานที่รอตรวจของแต่ละข้อ (?ids=1,2,3) — หน้าคลังข้อสอบใช้ถามหลังบันทึก */
+  @Roles(2)
+  @Get('open-by-items')
+  openByItems(@Query('ids') ids?: string) {
+    const itemIds = (ids ?? '')
+      .split(',')
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n > 0)
+      .slice(0, 500);
+    return this.service.countOpenByItems(itemIds);
+  }
+
+  @Roles(2)
+  @Post('resolve-items')
+  resolveItems(@Request() req, @Body() dto: ResolveItemReportsDto) {
+    return this.service.resolveByItems(req.user.userId, dto);
   }
 
   @Roles(2)

@@ -1222,6 +1222,14 @@ export class ItemsBankService {
       }
     }
 
+    // บันทึกเวลาที่แก้ข้อนี้ลงในรายงานปัญหาที่ยังรอตรวจ ให้หน้ารายงานเห็นว่าแก้แล้ว
+    await this.itemRepo.manager
+      .createQueryBuilder()
+      .update('item_reports')
+      .set({ item_edited_at: () => 'now()' })
+      .where('item_id = :item_id AND status = :status', { item_id, status: 'open' })
+      .execute();
+
     return {
       message: 'อัพเดทคำถามสำเร็จ',
       item: await this.itemRepo.findOne({ where: { item_id } })
